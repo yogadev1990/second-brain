@@ -1,9 +1,9 @@
 version: '3.8'
 
 services:
-  secondbrain:
+  waguri:
     build: .
-    container_name: secondbrain-backend
+    container_name: secondbrain
     restart: always
     ports:
       - "3000:3000"
@@ -12,3 +12,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     env_file:
       - .env
+    networks:
+      - proxy-net
+
+networks:
+  proxy-net:
+    external: true
