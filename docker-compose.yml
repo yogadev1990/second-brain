@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  secondbrain:
+    build: .
+    container_name: secondbrain-backend
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mounting docker.sock agar perintah docker-cli di dalam container terhubung dengan Docker Daemon host VPS
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - .env
