@@ -5,7 +5,7 @@ let milvusAddress = null;
 
 export const declaration = {
     name: "tanam_ingatan",
-    description: "HANYA gunakan alat ini jika pengguna SECARA EKSPLISIT memberikan perintah 'simpan', 'ingat', atau 'catat'. JANGAN PERNAH mengarang atau membuat-buat teks sendiri. Teks yang dimasukkan harus 100% berasal dari input pengguna. Berfungsi untuk menyimpan data, jurnal, atau log ke dalam memori Vector DB.",
+    description: "Gunakan alat ini HANYA untuk menyimpan pengetahuan abstrak, informasi statis, ide proyek, catatan riset, atau memori umum. DILARANG KERAS menggunakan alat ini untuk menyimpan jadwal, rutinitas harian, target waktu, atau janji temu. Jika input berkaitan dengan waktu, rutinitas, atau jadwal, abaikan alat ini dan panggil 'tambah_jadwal'.",
     parameters: {
         type: "object",
         properties: {

@@ -14,9 +14,17 @@ export async function chatWithWaguri(prompt, chatHistory = []) {
         throw new Error("GEMINI_API_KEY belum dikonfigurasi di file .env");
     }
 
+    // Dapatkan waktu saat ini secara dinamis dengan zona waktu WIB (Asia/Jakarta)
+    const waktuSekarang = new Date().toLocaleString("id-ID", {
+        timeZone: "Asia/Jakarta",
+        dateStyle: "full",
+        timeStyle: "long"
+    });
+
     // Konfigurasi model dan daftarkan tools jika ada
     const modelConfig = {
         model: "gemini-2.5-flash",
+        systemInstruction: `Kamu adalah Waguri, asisten AI otonom. Waktu server saat ini adalah: ${waktuSekarang}. Lokasi fisik pengguna saat ini berada di Palembang. Status pengguna: Randa, seorang INTP, Mahasiswa Kedokteran Gigi yang saat ini sedang dalam masa libur perkuliahan. Gunakan informasi waktu ini sebagai patokan absolut jika pengguna menyebutkan kata seperti 'besok', 'lusa', atau 'nanti malam'.`
     };
     
     if (toolDeclarations.length > 0) {

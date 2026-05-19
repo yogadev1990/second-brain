@@ -8,8 +8,19 @@ import { Server } from 'socket.io';
 
 dotenv.config();
 
+import mongoose from 'mongoose';
+import { initJantungKognitif } from './cron/jantung_kognitif.js';
+import { initResetHarian } from './cron/reset_harian.js';
+import { initWatchdogStatis } from './cron/watchdog_statis.js';
+
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Koneksi ke MongoDB
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/waguri_db';
+mongoose.connect(MONGO_URI)
+    .then(() => console.log('✅ Terhubung ke MongoDB'))
+    .catch((err) => console.error('❌ Gagal terhubung ke MongoDB:', err));
 
 // Buat HTTP server untuk menggabungkan Express dan Socket.io
 const httpServer = createServer(app);
@@ -80,6 +91,15 @@ io.on('connection', (socket) => {
         console.log(`[Socket] Klien terputus: ${socket.id}`);
     });
 });
+
+// Inisialisasi mesin cron Jantung Kognitif
+initJantungKognitif(io);
+
+// Inisialisasi mesin cron Reset Tengah Malam (Rutinitas Harian)
+initResetHarian();
+
+// Inisialisasi mesin cron Watchdog Statis (Alarm Jadwal Pasti)
+initWatchdogStatis(io);
 
 app.use(cors());
 app.use(express.json());
