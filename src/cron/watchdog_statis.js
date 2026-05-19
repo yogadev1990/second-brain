@@ -5,45 +5,50 @@ import { chatWithWaguri } from '../services/geminiService.js';
 export const initWatchdogStatis = (io) => {
     // Berjalan setiap menit
     cron.schedule('* * * * *', async () => {
+        console.log(`[Watchdog Detak] Cron berjalan pada: ${new Date().toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta' })}`);
+        
         try {
             const waktuSekarang = new Date();
             const waktuBatas = new Date(waktuSekarang.getTime() + 15 * 60000); // 15 menit dari sekarang
 
-            // Cari jadwal statis yang akan datang dalam 15 menit ke depan, belum selesai, dan belum dinotifikasi
+            // PERBAIKAN LOGIKA: Ambil semua jadwal yang waktunya KURANG DARI 15 menit ke depan, 
+            // termasuk yang sudah kelewat (karena mungkin server mati sesaat), asalkan belum dinotifikasi!
             const jadwalMendatang = await Jadwal.find({
                 tipe_jadwal: 'statis',
                 status_selesai: false,
                 notifikasi_terkirim: false,
-                waktu_eksekusi_statis: { $gte: waktuSekarang, $lte: waktuBatas }
+                waktu_eksekusi_statis: { $lte: waktuBatas } 
             });
 
-            if (jadwalMendatang.length === 0) return;
+            console.log(`[Watchdog Kueri] Menemukan ${jadwalMendatang.length} jadwal yang perlu dinotifikasi.`);
+
+            if (jadwalMendatang.length === 0) return; // Keluar jika kosong
 
             for (const jadwal of jadwalMendatang) {
-                // Update status notifikasi agar tidak terkirim dua kali
+                console.log(`[Watchdog Eksekusi] Memproses jadwal: ${jadwal.nama_kegiatan} | Waktu Eksekusi: ${jadwal.waktu_eksekusi_statis}`);
+                
+                // Kunci datanya agar tidak ke-spam di menit berikutnya
                 await Jadwal.updateOne({ _id: jadwal._id }, { $set: { notifikasi_terkirim: true } });
 
-                console.log(`[Watchdog] Ditemukan jadwal statis segera: ${jadwal.nama_kegiatan}`);
+                const hiddenPrompt = `Instruksi Sistem (PENTING): Berperanlah sebagai asisten proaktif. Beritahu pengguna bahwa jadwal '${jadwal.nama_kegiatan}' akan segera dimulai. Buat pesannya singkat, mendesak, dan natural.`;
 
-                // Instruksi sistem proaktif
-                const hiddenPrompt = `
-Instruksi Sistem (PENTING): Berperanlah sebagai asisten proaktif. Beritahu pengguna bahwa jadwal '${jadwal.nama_kegiatan}' akan segera dimulai dalam waktu kurang dari 15 menit. Buat pesannya singkat, mendesak, dan natural.
-                `.trim();
-
+                console.log(`[Watchdog Gemini] Meminta Gemini menyusun pesan...`);
                 const result = await chatWithWaguri(hiddenPrompt, []);
+                console.log(`[Watchdog Gemini] Berhasil menyusun pesan!`);
 
-                io.emit('chat_reply', {
+                const payload = {
                     status: "success",
                     text: result.text,
                     isProactive: true
-                });
+                };
 
-                console.log(`[Watchdog] Pesan proaktif untuk ${jadwal.nama_kegiatan} berhasil dikirim.`);
+                console.log(`[Watchdog Emit] Menembakkan Socket.io ke UI...`);
+                io.emit('chat_reply', payload);
             }
         } catch (error) {
-            console.error('[Watchdog] Terjadi kesalahan saat memeriksa jadwal statis:', error);
+            console.error('[Watchdog ERROR FATAL] Terjadi kesalahan:', error);
         }
     });
 
-    console.log('✅ Mesin Cron "Watchdog Statis" telah diinisialisasi.');
+    console.log('✅ Mesin Cron "Watchdog Statis" telah diinisialisasi dengan Radar Diagnostik.');
 };
