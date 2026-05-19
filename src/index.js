@@ -13,6 +13,8 @@ import { getAuthUrl, saveTokens, initGoogleAuth } from './services/googleAuth.js
 import { initJantungKognitif } from './cron/jantung_kognitif.js';
 import { initResetHarian } from './cron/reset_harian.js';
 import { initWatchdogStatis } from './cron/watchdog_statis.js';
+import { initWatchdogPrediktif } from './cron/watchdog_prediktif.js';
+import { initInjeksiSholat } from './cron/injeksi_sholat.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -101,6 +103,12 @@ initResetHarian();
 
 // Inisialisasi mesin cron Watchdog Statis (Alarm Jadwal Pasti)
 initWatchdogStatis(io);
+
+// Inisialisasi mesin cron Watchdog Prediktif (Peringatan Lalu Lintas)
+initWatchdogPrediktif(io);
+
+// Inisialisasi mesin cron Injeksi Sholat Harian
+initInjeksiSholat();
 
 app.use(cors());
 app.use(express.json());

@@ -14,10 +14,11 @@ export const initWatchdogStatis = (io) => {
             // PERBAIKAN LOGIKA: Ambil semua jadwal yang waktunya KURANG DARI 15 menit ke depan, 
             // termasuk yang sudah kelewat (karena mungkin server mati sesaat), asalkan belum dinotifikasi!
             const jadwalMendatang = await Jadwal.find({
-                tipe_jadwal: 'statis',
+                tipe_jadwal: { $in: ['statis', 'absolut'] },
                 status_selesai: false,
                 notifikasi_terkirim: false,
-                waktu_eksekusi_statis: { $lte: waktuBatas } 
+                waktu_eksekusi_statis: { $lte: waktuBatas },
+                $or: [{ butuh_fisik: false }, { butuh_fisik: { $exists: false } }]
             });
 
             console.log(`[Watchdog Kueri] Menemukan ${jadwalMendatang.length} jadwal yang perlu dinotifikasi.`);

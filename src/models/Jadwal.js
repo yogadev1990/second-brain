@@ -12,7 +12,7 @@ const jadwalSchema = new mongoose.Schema({
     },
     tipe_jadwal: {
         type: String,
-        enum: ['statis', 'kuota_fleksibel'],
+        enum: ['statis', 'kuota_fleksibel', 'absolut'],
         required: true
     },
     target_durasi_menit: {
@@ -41,6 +41,22 @@ const jadwalSchema = new mongoose.Schema({
         default: false
     },
     notifikasi_terkirim: {
+        type: Boolean,
+        default: false
+    },
+    butuh_fisik: {
+        type: Boolean,
+        default: false
+    },
+    lokasi_tujuan: {
+        type: String,
+        default: null
+    },
+    koordinat_tujuan: {
+        type: String,
+        default: null
+    },
+    peringatan_macet_terkirim: {
         type: Boolean,
         default: false
     }

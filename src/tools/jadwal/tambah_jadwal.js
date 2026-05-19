@@ -37,6 +37,18 @@ export const declaration = {
             waktu_eksekusi_statis: {
                 type: "STRING",
                 description: "Waktu eksekusi untuk jadwal statis dalam format ISO-8601. DILARANG KERAS menggunakan huruf 'Z' di akhir waktu. WAJIB menggunakan offset zona waktu WIB yaitu +07:00. Contoh format yang benar: '2026-05-19T23:38:00+07:00'."
+            },
+            butuh_fisik: {
+                type: "BOOLEAN",
+                description: "Set 'true' jika jadwal ini mengharuskan pengguna bepergian/pergi ke lokasi tertentu (contoh: meeting di kantor, nongkrong di kafe, kelas di kampus). Set 'false' atau kosongkan jika jadwal hanya berupa alarm/pengingat diam di rumah tanpa perlu mobilitas (contoh: minum obat, cuci muka, sholat)."
+            },
+            lokasi_tujuan: {
+                type: "STRING",
+                description: "Nama atau alamat lokasi tujuan jika butuh_fisik=true (contoh: 'Kantor Pusat Jl. Sudirman No.1', 'Kampus UI Depok'). Kosongkan jika butuh_fisik=false."
+            },
+            koordinat_tujuan: {
+                type: "STRING",
+                description: "Koordinat GPS lokasi tujuan dalam format 'latitude,longitude' (contoh: '-6.2088,106.8456'). Kosongkan jika tidak diketahui atau butuh_fisik=false."
             }
         },
         required: ["id_tugas", "nama_kegiatan", "tipe_jadwal"]
@@ -52,7 +64,10 @@ export const execute = async (args) => {
             target_durasi_menit,
             siklus_reset,
             kondisi_pemicu,
-            waktu_eksekusi_statis
+            waktu_eksekusi_statis,
+            butuh_fisik,
+            lokasi_tujuan,
+            koordinat_tujuan
         } = args;
 
         const jadwalData = {
@@ -65,6 +80,9 @@ export const execute = async (args) => {
         if (siklus_reset !== undefined) jadwalData.siklus_reset = siklus_reset;
         if (kondisi_pemicu !== undefined) jadwalData.kondisi_pemicu = kondisi_pemicu;
         if (waktu_eksekusi_statis) jadwalData.waktu_eksekusi_statis = new Date(waktu_eksekusi_statis);
+        if (butuh_fisik !== undefined) jadwalData.butuh_fisik = butuh_fisik;
+        if (lokasi_tujuan) jadwalData.lokasi_tujuan = lokasi_tujuan;
+        if (koordinat_tujuan) jadwalData.koordinat_tujuan = koordinat_tujuan;
 
         const jadwalBaru = new Jadwal(jadwalData);
         await jadwalBaru.save();
