@@ -30,7 +30,7 @@ export const saveTokens = async (code) => {
     await GoogleToken.findOneAndUpdate(
         { user: 'randa_intp' },
         { ...tokens, user: 'randa_intp' },
-        { upsert: true, new: true }
+        { upsert: true, returnDocument: 'after' }
     );
     console.log('✅ Brankas Token Google berhasil diperbarui di MongoDB.');
     return tokens;

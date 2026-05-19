@@ -1,5 +1,6 @@
 import Jadwal from '../../models/Jadwal.js';
-import { sinkronisasiKeKalender } from '../../services/googleCalendar.js';
+import { google } from 'googleapis';
+import { oauth2Client } from '../../services/googleAuth.js';
 
 export const declaration = {
     name: "tambah_jadwal",
@@ -87,10 +88,41 @@ export const execute = async (args) => {
         const jadwalBaru = new Jadwal(jadwalData);
         await jadwalBaru.save();
 
-        // Sinkronisasi ke Google Calendar jika ini jadwal statis
+        // Jika ini adalah jadwal statis, suntikkan juga ke Google Calendar
         if (tipe_jadwal === 'statis' && waktu_eksekusi_statis) {
-            // Menjalankan proses di latar belakang agar tidak memperlambat balasan Gemini
-            sinkronisasiKeKalender(nama_kegiatan, waktu_eksekusi_statis, target_durasi_menit);
+            try {
+                const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+
+                // Buat estimasi waktu selesai (default: 1 jam dari waktu mulai)
+                const waktuMulai = new Date(waktu_eksekusi_statis);
+                const waktuSelesai = new Date(waktuMulai.getTime() + 60 * 60000);
+
+                await calendar.events.insert({
+                    calendarId: 'primary',
+                    requestBody: {
+                        summary: nama_kegiatan,
+                        description: 'Dibuat secara otomatis oleh Waguri AI (Jadwal Statis)',
+                        start: {
+                            dateTime: waktuMulai.toISOString(),
+                            timeZone: 'Asia/Jakarta',
+                        },
+                        end: {
+                            dateTime: waktuSelesai.toISOString(),
+                            timeZone: 'Asia/Jakarta',
+                        },
+                        reminders: {
+                            useDefault: false,
+                            overrides: [
+                                { method: 'popup', minutes: 15 },
+                            ],
+                        },
+                    },
+                });
+                console.log(`✅ [Google Calendar] Acara '${nama_kegiatan}' berhasil diinjeksi.`);
+            } catch (err) {
+                console.error('❌ [Google Calendar] Gagal menyuntikkan jadwal:', err.message);
+                // Kita tidak men-throw error agar jika Google gagal, jadwal di MongoDB tetap aman
+            }
         }
 
         return {

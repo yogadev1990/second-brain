@@ -27,7 +27,7 @@ export const injeksiWaktuSholat = async () => {
 
         const timings = response.data.data.timings;
         const sholatWajib = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
-        const tanggalHariIni = new Date().toISOString().split('T')[0];
+        const tanggalHariIni = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' }); // Format: YYYY-MM-DD, dipaksa WIB
 
         for (const waktu of sholatWajib) {
             const namaLokal = NAMA_SHOLAT_MAP[waktu];
@@ -46,7 +46,7 @@ export const injeksiWaktuSholat = async () => {
                     status_selesai: false,
                     notifikasi_terkirim: false
                 },
-                { upsert: true, new: true }
+                { upsert: true, returnDocument: 'after' }
             );
         }
         console.log(`✅ [Sholat] 5 waktu sholat absolut berhasil diinjeksi untuk ${tanggalHariIni}.`);
