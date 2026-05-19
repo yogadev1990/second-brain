@@ -34,7 +34,7 @@ Instruksi Sistem (PENTING): Berperanlah sebagai asisten proaktif. Beritahu pengg
 
                 io.emit('chat_reply', {
                     status: "success",
-                    response: result.text,
+                    text: result.text,
                     isProactive: true
                 });
 
