@@ -110,6 +110,29 @@ app.get('/', (req, res) => {
     res.send('Waguri AI Server is running.');
 });
 
+app.get('/api/auth/google', (req, res) => {
+    res.redirect(getAuthUrl());
+});
+
+// Rute Callback (Target dari Redirect URI yang kamu set di Google Cloud)
+app.get('/api/auth/google/callback', async (req, res) => {
+    const code = req.query.code;
+    if (!code) return res.status(400).send('Kode otorisasi tidak ditemukan.');
+
+    try {
+        await saveTokens(code);
+        res.send(`
+                <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
+                    <h1 style="color: #4CAF50;">✅ Otorisasi Mutlak Berhasil</h1>
+                    <p>Waguri sekarang memiliki hak akses ke Google Workspace Anda.</p>
+                    <p>Silakan tutup jendela ini dan kembali ke terminal.</p>
+                </div>
+            `);
+    } catch (error) {
+        console.error('Error saat menyimpan token:', error);
+        res.status(500).send('Gagal mengamankan token Google.');
+    }
+});
 // Middleware autentikasi untuk REST API
 app.use(requireAuth);
 
@@ -139,29 +162,6 @@ app.post('/api/chat', async (req, res) => {
     }
 });
 // Rute untuk memulai proses Login Google
-app.get('/api/auth/google', (req, res) => {
-    res.redirect(getAuthUrl());
-});
-
-// Rute Callback (Target dari Redirect URI yang kamu set di Google Cloud)
-app.get('/api/auth/google/callback', async (req, res) => {
-    const code = req.query.code;
-    if (!code) return res.status(400).send('Kode otorisasi tidak ditemukan.');
-
-    try {
-        await saveTokens(code);
-        res.send(`
-                <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
-                    <h1 style="color: #4CAF50;">✅ Otorisasi Mutlak Berhasil</h1>
-                    <p>Waguri sekarang memiliki hak akses ke Google Workspace Anda.</p>
-                    <p>Silakan tutup jendela ini dan kembali ke terminal.</p>
-                </div>
-            `);
-    } catch (error) {
-        console.error('Error saat menyimpan token:', error);
-        res.status(500).send('Gagal mengamankan token Google.');
-    }
-});
 
 httpServer.listen(PORT, () => {
     console.log(`=====================================`);
