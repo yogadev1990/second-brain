@@ -37,12 +37,12 @@ ${rangkuman}
 
             // Panggil Gemini API
             const result = await chatWithWaguri(hiddenPrompt, []);
-            
+
             // Eksekusi WebSocket: kirimkan balasan ke semua client
             // Jika Anda hanya ingin mengirim ke pengguna tertentu, Anda butuh manajemen socket_id
             io.emit('chat_reply', {
                 status: "success",
-                response: result.text,
+                text: result.text,
                 isProactive: true // penanda bahwa pesan ini proaktif dari server
             });
 
