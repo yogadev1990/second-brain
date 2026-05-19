@@ -35,7 +35,7 @@ export const declaration = {
             },
             waktu_eksekusi_statis: {
                 type: "STRING",
-                description: "Waktu eksekusi jika jadwal bersifat statis, dalam format ISO (misal: '2023-10-25T10:00:00Z'). Kosongkan jika tidak relevan."
+                description: "Waktu eksekusi untuk jadwal statis dalam format ISO-8601. DILARANG KERAS menggunakan huruf 'Z' di akhir waktu. WAJIB menggunakan offset zona waktu WIB yaitu +07:00. Contoh format yang benar: '2026-05-19T23:38:00+07:00'."
             }
         },
         required: ["id_tugas", "nama_kegiatan", "tipe_jadwal"]
