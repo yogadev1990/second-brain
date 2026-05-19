@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename);
 async function loadTools() {
     const declarations = [];
     const handlers = {};
-    const folders = ['vps', 'android', 'eksternal'];
+    const folders = ['vps', 'android', 'eksternal', 'memori'];
 
     console.log(`[Tools Registry] Memulai pemuatan alat-alat Waguri...`);
 
