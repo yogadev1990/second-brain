@@ -9,6 +9,7 @@ import { Server } from 'socket.io';
 dotenv.config();
 
 import mongoose from 'mongoose';
+import { getAuthUrl, saveTokens, initGoogleAuth } from './services/googleAuth.js';
 import { initJantungKognitif } from './cron/jantung_kognitif.js';
 import { initResetHarian } from './cron/reset_harian.js';
 import { initWatchdogStatis } from './cron/watchdog_statis.js';
@@ -63,7 +64,7 @@ io.on('connection', (socket) => {
             }
 
             console.log(`[Socket][${socket.id}] Menerima pesan: "${prompt}"`);
-            
+
             // Teruskan ke fungsi logika utama Gemini
             const result = await chatWithWaguri(prompt, history);
 
@@ -91,7 +92,7 @@ io.on('connection', (socket) => {
         console.log(`[Socket] Klien terputus: ${socket.id}`);
     });
 });
-
+await initGoogleAuth();
 // Inisialisasi mesin cron Jantung Kognitif
 initJantungKognitif(io);
 
@@ -123,7 +124,7 @@ app.post('/api/chat', async (req, res) => {
 
         console.log(`[REST] Menerima pesan: "${prompt}"`);
         const result = await chatWithWaguri(prompt, history || []);
-        
+
         res.json({
             status: "success",
             response: result.text,
@@ -137,8 +138,31 @@ app.post('/api/chat', async (req, res) => {
         });
     }
 });
+// Rute untuk memulai proses Login Google
+app.get('/api/auth/google', (req, res) => {
+    res.redirect(getAuthUrl());
+});
 
-// Gunakan httpServer.listen untuk menjalankan server HTTP dan WebSocket
+// Rute Callback (Target dari Redirect URI yang kamu set di Google Cloud)
+app.get('/api/auth/google/callback', async (req, res) => {
+    const code = req.query.code;
+    if (!code) return res.status(400).send('Kode otorisasi tidak ditemukan.');
+
+    try {
+        await saveTokens(code);
+        res.send(`
+                <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
+                    <h1 style="color: #4CAF50;">✅ Otorisasi Mutlak Berhasil</h1>
+                    <p>Waguri sekarang memiliki hak akses ke Google Workspace Anda.</p>
+                    <p>Silakan tutup jendela ini dan kembali ke terminal.</p>
+                </div>
+            `);
+    } catch (error) {
+        console.error('Error saat menyimpan token:', error);
+        res.status(500).send('Gagal mengamankan token Google.');
+    }
+});
+
 httpServer.listen(PORT, () => {
     console.log(`=====================================`);
     console.log(`🤖 Waguri AI Server berjalan di port ${PORT}`);
