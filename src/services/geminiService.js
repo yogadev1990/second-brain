@@ -1,137 +1,54 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { toolDeclarations, toolHandlers } from "../tools/index.js";
-import dotenv from "dotenv";
+import cron from 'node-cron';
+import Jadwal from '../models/Jadwal.js';
+import { chatWithWaguri } from '../services/geminiService.js';
 
-dotenv.config();
+export const initWatchdogStatis = (io) => {
+    // Berjalan setiap menit
+    cron.schedule('* * * * *', async () => {
+        console.log(`[Watchdog Detak] Cron berjalan pada: ${new Date().toLocaleTimeString('id-ID', { timeZone: 'Asia/Jakarta' })}`);
+        
+        try {
+            const waktuSekarang = new Date();
+            const waktuBatas = new Date(waktuSekarang.getTime() + 15 * 60000); // 15 menit dari sekarang
 
-// Inisialisasi Gemini Client
-// Menggunakan API Key dari environment variable
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+            // PERBAIKAN LOGIKA: Ambil semua jadwal yang waktunya KURANG DARI 15 menit ke depan, 
+            // termasuk yang sudah kelewat (karena mungkin server mati sesaat), asalkan belum dinotifikasi!
+            const jadwalMendatang = await Jadwal.find({
+                tipe_jadwal: 'statis',
+                status_selesai: false,
+                notifikasi_terkirim: false,
+                waktu_eksekusi_statis: { $lte: waktuBatas } 
+            });
 
-export async function chatWithWaguri(prompt, chatHistory = []) {
-    // Cek apakah API Key sudah dikonfigurasi
-    if (!process.env.GEMINI_API_KEY) {
-        throw new Error("GEMINI_API_KEY belum dikonfigurasi di file .env");
-    }
+            console.log(`[Watchdog Kueri] Menemukan ${jadwalMendatang.length} jadwal yang perlu dinotifikasi.`);
 
-    // Dapatkan waktu saat ini secara dinamis dengan zona waktu WIB (Asia/Jakarta)
-    const waktuSekarang = new Date().toLocaleString("id-ID", {
-        timeZone: "Asia/Jakarta",
-        dateStyle: "full",
-        timeStyle: "long"
-    });
+            if (jadwalMendatang.length === 0) return; // Keluar jika kosong
 
-    // Konfigurasi model dan daftarkan tools jika ada
-    const modelConfig = {
-        model: "gemini-2.5-flash",
-        systemInstruction: `Kamu adalah Waguri, asisten AI otonom. Waktu server saat ini adalah: ${waktuSekarang}. Lokasi fisik pengguna saat ini berada di Palembang. Status pengguna: Randa, seorang INTP, Mahasiswa Kedokteran Gigi yang saat ini sedang dalam masa libur perkuliahan. Gunakan informasi waktu ini sebagai patokan absolut jika pengguna menyebutkan kata seperti 'besok', 'lusa', atau 'nanti malam'.`
-    };
-    
-    if (toolDeclarations.length > 0) {
-        modelConfig.tools = [{
-            functionDeclarations: toolDeclarations
-        }];
-        console.log(`[Gemini] Model diinisialisasi dengan ${toolDeclarations.length} alat/tools.`);
-    }
-
-    const model = genAI.getGenerativeModel(modelConfig);
-
-    const chat = model.startChat({
-        history: chatHistory,
-    });
-
-    // Akumulator token untuk seluruh siklus percakapan (termasuk function call rounds)
-    const tokenUsage = {
-        promptTokens: 0,
-        candidatesTokens: 0,
-        totalTokens: 0,
-        roundDetails: []
-    };
-
-    // Helper: catat token dari setiap respons Gemini
-    function trackTokens(response, label) {
-        const meta = response.usageMetadata;
-        if (meta) {
-            const prompt = meta.promptTokenCount || 0;
-            const candidates = meta.candidatesTokenCount || 0;
-            const total = meta.totalTokenCount || 0;
-
-            tokenUsage.promptTokens += prompt;
-            tokenUsage.candidatesTokens += candidates;
-            tokenUsage.totalTokens += total;
-            tokenUsage.roundDetails.push({ label, prompt, candidates, total });
-
-            console.log(`[Token] ${label} — Prompt: ${prompt} | Candidates: ${candidates} | Total: ${total}`);
-        }
-    }
-
-    try {
-        let result = await chat.sendMessage(prompt);
-        let response = result.response;
-        trackTokens(response, "Pesan awal");
-
-        // Loop untuk menangani function calls secara sekuensial (misalnya jika Gemini memanggil tool berkali-kali)
-        let rounds = 0;
-        const MAX_ROUNDS = 5;
-
-        while (typeof response.functionCalls === 'function' && response.functionCalls() && response.functionCalls().length > 0 && rounds < MAX_ROUNDS) {
-            rounds++;
-            const calls = response.functionCalls();
-            const functionResponses = [];
-
-            for (const call of calls) {
-                // Function Call Router: Mencocokkan nama tool dengan fungsinya di registri
-                const handler = toolHandlers[call.name];
+            for (const jadwal of jadwalMendatang) {
+                console.log(`[Watchdog Eksekusi] Memproses jadwal: ${jadwal.nama_kegiatan} | Waktu Eksekusi: ${jadwal.waktu_eksekusi_statis}`);
                 
-                if (handler) {
-                    console.log(`[Function Call] Mengeksekusi: ${call.name} dengan args:`, call.args);
-                    try {
-                        const toolResult = await handler(call.args);
-                        functionResponses.push({
-                            functionResponse: {
-                                name: call.name,
-                                response: toolResult
-                            }
-                        });
-                    } catch (err) {
-                        console.error(`[Error] Eksekusi alat ${call.name} gagal:`, err);
-                        functionResponses.push({
-                            functionResponse: {
-                                name: call.name,
-                                response: { error: err.message }
-                            }
-                        });
-                    }
-                } else {
-                    console.warn(`[Warning] Alat dengan nama ${call.name} tidak ditemukan di registri.`);
-                    functionResponses.push({
-                        functionResponse: {
-                            name: call.name,
-                            response: { error: "Alat tidak terdaftar pada backend" }
-                        }
-                    });
-                }
+                // Kunci datanya agar tidak ke-spam di menit berikutnya
+                await Jadwal.updateOne({ _id: jadwal._id }, { $set: { notifikasi_terkirim: true } });
+
+                const hiddenPrompt = `Instruksi Sistem (PENTING): Berperanlah sebagai asisten proaktif. Beritahu pengguna bahwa jadwal '${jadwal.nama_kegiatan}' akan segera dimulai. Buat pesannya singkat, mendesak, dan natural.`;
+
+                console.log(`[Watchdog Gemini] Meminta Gemini menyusun pesan...`);
+                const result = await chatWithWaguri(hiddenPrompt, []);
+                console.log(`[Watchdog Gemini] Berhasil menyusun pesan!`);
+
+                const payload = {
+                    status: "success",
+                    text: result.text,
+                    isProactive: true
+                };
+
+                console.log(`[Watchdog Emit] Menembakkan Socket.io ke UI...`);
+                io.emit('chat_reply', payload);
             }
-
-            // Kirim balik hasil dari functions ke Gemini
-            console.log(`[Gemini] Mengirim hasil alat kembali ke model... (Ronde ${rounds})`);
-            result = await chat.sendMessage(functionResponses);
-            response = result.response;
-            trackTokens(response, `Function Call Ronde ${rounds}`);
+        } catch (error) {
+            console.error('[Watchdog ERROR FATAL] Terjadi kesalahan:', error);
         }
+    });
 
-        if (rounds >= MAX_ROUNDS) {
-            console.warn("[Warning] Mencapai batas maksimal iterasi pemanggilan alat (MAX_ROUNDS).");
-        }
-
-        console.log(`[Token] === TOTAL AKUMULASI === Prompt: ${tokenUsage.promptTokens} | Candidates: ${tokenUsage.candidatesTokens} | Grand Total: ${tokenUsage.totalTokens}`);
-
-        return {
-            text: response.text(),
-            tokenUsage
-        };
-    } catch (error) {
-        console.error("Error pada chatWithWaguri:", error);
-        throw error;
-    }
-}
+    console.log('✅ Mesin Cron "Watchdog Statis" telah diinisialisasi dengan Radar Diagnostik.');
+};
