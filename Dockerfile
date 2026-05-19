@@ -9,7 +9,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Pasang dependensi untuk production
-RUN npm ci --only=production
+RUN npm install --omit=dev
 
 # Salin seluruh kode program
 COPY . .
