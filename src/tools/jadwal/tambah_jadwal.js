@@ -1,4 +1,5 @@
 import Jadwal from '../../models/Jadwal.js';
+import { sinkronisasiKeKalender } from '../../services/googleCalendar.js';
 
 export const declaration = {
     name: "tambah_jadwal",
@@ -67,6 +68,12 @@ export const execute = async (args) => {
 
         const jadwalBaru = new Jadwal(jadwalData);
         await jadwalBaru.save();
+
+        // Sinkronisasi ke Google Calendar jika ini jadwal statis
+        if (tipe_jadwal === 'statis' && waktu_eksekusi_statis) {
+            // Menjalankan proses di latar belakang agar tidak memperlambat balasan Gemini
+            sinkronisasiKeKalender(nama_kegiatan, waktu_eksekusi_statis, target_durasi_menit);
+        }
 
         return {
             status: "success",
