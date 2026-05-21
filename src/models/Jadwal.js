@@ -64,6 +64,9 @@ const jadwalSchema = new mongoose.Schema({
     timestamps: true
 });
 
+// Index untuk optimasi kueri harian
+jadwalSchema.index({ waktu_eksekusi_statis: 1 });
+
 const Jadwal = mongoose.model('Jadwal', jadwalSchema);
 
 export default Jadwal;

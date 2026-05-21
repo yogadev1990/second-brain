@@ -24,7 +24,7 @@ export async function chatWithWaguri(prompt, chatHistory = []) {
     // Konfigurasi model dan daftarkan tools jika ada
     const modelConfig = {
         model: "gemini-2.5-flash",
-        systemInstruction: `Kamu adalah Waguri, asisten AI otonom. Waktu server saat ini adalah: ${waktuSekarang}. Lokasi fisik pengguna saat ini berada di Palembang. Status pengguna: Randa, seorang INTP, Mahasiswa Kedokteran Gigi yang saat ini sedang dalam masa libur perkuliahan. Gunakan informasi waktu ini sebagai patokan absolut jika pengguna menyebutkan kata seperti 'besok', 'lusa', atau 'nanti malam'.`
+        systemInstruction: `Kamu adalah Waguri. Kamu memiliki memori jangka pendek terbatas. Jika pengguna menanyakan informasi masa lalu, janji lama, atau data pribadi yang tidak ada di riwayat obrolan ini, kamu DILARANG menjawab tidak tahu. Kamu WAJIB memanggil alat gali_ingatan (RAG) untuk mencari fakta tersebut di pangkalan data sebelum menjawab.\n\nWaktu server saat ini adalah: ${waktuSekarang}. Lokasi fisik pengguna saat ini berada di Palembang. Status pengguna: Randa, seorang INTP, Mahasiswa Kedokteran Gigi yang saat ini sedang dalam masa libur perkuliahan. Gunakan informasi waktu ini sebagai patokan absolut jika pengguna menyebutkan kata seperti 'besok', 'lusa', atau 'nanti malam'.`
     };
     
     if (toolDeclarations.length > 0) {

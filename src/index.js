@@ -5,6 +5,11 @@ import { requireAuth } from './middleware/auth.js';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import multer from 'multer';
+import { GoogleAIFileManager } from '@google/generative-ai/server';
 
 dotenv.config();
 
@@ -15,9 +20,14 @@ import { initResetHarian } from './cron/reset_harian.js';
 import { initWatchdogStatis } from './cron/watchdog_statis.js';
 import { initWatchdogPrediktif } from './cron/watchdog_prediktif.js';
 import { initInjeksiSholat } from './cron/injeksi_sholat.js';
+import Jadwal from './models/Jadwal.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Setup File Manager dan Multer
+const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY || "");
+const upload = multer({ dest: os.tmpdir() }); // Jangan simpan di memori (RAM)
 
 // Koneksi ke MongoDB
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/waguri_db';
@@ -36,6 +46,49 @@ const io = new Server(httpServer, {
     }
 });
 
+// Manajemen Ingatan Jangka Pendek (Context Window - RAM)
+const userSessions = new Map();
+
+// Pelacak Token Global
+let dailyTokenUsage = 0;
+
+// Fungsi Pengumpul Metrik (Data Aggregator)
+async function gatherTelemetryData() {
+    const ramUsagePercent = ((os.totalmem() - os.freemem()) / os.totalmem()) * 100;
+    const cpuLoad = os.loadavg(); // [1m, 5m, 15m]
+    const serverUptime = os.uptime(); // in seconds
+
+    // Kueri Metrik Kognitif: Jadwal statis hari ini
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const matchToday = {
+        tipe_jadwal: 'statis',
+        waktu_eksekusi_statis: { $gte: startOfDay, $lte: endOfDay }
+    };
+
+    // Parallel count (Optimized)
+    const [totalTugas, tugasSelesai] = await Promise.all([
+        Jadwal.countDocuments(matchToday),
+        Jadwal.countDocuments({ ...matchToday, status_selesai: true })
+    ]);
+
+    return {
+        system: {
+            ramUsagePercent,
+            cpuLoad,
+            serverUptime,
+            dailyTokenUsage
+        },
+        cognitive: {
+            totalTugasHariIni: totalTugas,
+            tugasSelesaiHariIni: tugasSelesai
+        }
+    };
+}
+
 // Lapisan Keamanan Socket.io (Otentikasi Token)
 io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
@@ -51,24 +104,67 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
     console.log(`[Socket] Klien terhubung: ${socket.id}`);
 
-    // Event saat menerima pesan teks dari klien
+    // Injeksi Mesin Interval (WebSocket Emitter)
+    const telemetryInterval = setInterval(async () => {
+        try {
+            const payload = await gatherTelemetryData();
+            socket.emit('dashboard_telemetry', payload);
+        } catch (error) {
+            console.error(`[Telemetry] Gagal mengumpulkan data:`, error.message);
+        }
+    }, 30000);
+
     socket.on('chat_message', async (data) => {
         try {
             // Opsional: Beritahu klien bahwa AI sedang memproses/mengetik
             socket.emit('typing', { isTyping: true });
 
-            // Mendukung data berupa string atau objek (mengandung prompt dan history)
+            // Mendukung data berupa string atau objek (mengandung prompt)
             const prompt = typeof data === 'string' ? data : data.prompt;
-            const history = data.history || [];
+            const attachment = typeof data === 'string' ? null : data.attachment;
+            
+            // Ambil riwayat obrolan dari memori
+            let history = userSessions.get(socket.id) || [];
 
-            if (!prompt) {
-                return socket.emit('chat_reply', { status: 'error', message: 'Prompt tidak boleh kosong' });
+            if (!prompt && !attachment) {
+                return socket.emit('chat_reply', { status: 'error', message: 'Pesan tidak boleh kosong' });
             }
 
-            console.log(`[Socket][${socket.id}] Menerima pesan: "${prompt}"`);
+            console.log(`[Socket][${socket.id}] Menerima pesan dari klien.`);
+
+            // Cek apakah ada attachment
+            let userParts = [];
+            if (prompt) {
+                userParts.push({ text: prompt });
+            } else {
+                userParts.push({ text: "Tolong analisis media ini." });
+            }
+
+            if (attachment && attachment.fileUri && attachment.mimeType) {
+                userParts.push({
+                    fileData: {
+                        fileUri: attachment.fileUri,
+                        mimeType: attachment.mimeType
+                    }
+                });
+            }
 
             // Teruskan ke fungsi logika utama Gemini
-            const result = await chatWithWaguri(prompt, history);
+            const result = await chatWithWaguri(userParts, history);
+
+            // Simpan ke riwayat memori (Sliding Window: maks 20 pesan)
+            history.push({ role: "user", parts: userParts });
+            history.push({ role: "model", parts: [{ text: result.text }] });
+
+            while (history.length > 20) {
+                history.shift();
+            }
+            userSessions.set(socket.id, history);
+
+            // Perbarui pelacak token global
+            if (result.tokenUsage && result.tokenUsage.totalTokens) {
+                dailyTokenUsage += result.tokenUsage.totalTokens;
+            }
 
             // Kirimkan balasan kembali ke klien
             socket.emit('chat_reply', {
@@ -90,8 +186,16 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Mekanisme Sapu Bersih
+    socket.on('clear_context', () => {
+        console.log(`[Socket][${socket.id}] Membersihkan konteks obrolan`);
+        userSessions.set(socket.id, []);
+    });
+
     socket.on('disconnect', () => {
         console.log(`[Socket] Klien terputus: ${socket.id}`);
+        userSessions.delete(socket.id); // Bersihkan memori saat putus
+        clearInterval(telemetryInterval); // Hukum Mutlak Pencegahan Kebocoran Memori
     });
 });
 await initGoogleAuth();
@@ -141,6 +245,39 @@ app.get('/api/auth/google/callback', async (req, res) => {
         res.status(500).send('Gagal mengamankan token Google.');
     }
 });
+
+// Pembuatan Endpoint Ingesti (HTTP POST) untuk Multimodal
+app.post('/api/upload-media', upload.single('file'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ success: false, error: 'Tidak ada fail yang diunggah' });
+    }
+
+    const filePath = req.file.path;
+    const mimeType = req.file.mimetype;
+    const displayName = req.file.originalname;
+
+    try {
+        const uploadResult = await fileManager.uploadFile(filePath, {
+            mimeType,
+            displayName,
+        });
+
+        res.json({
+            success: true,
+            fileUri: uploadResult.file.uri,
+            mimeType: uploadResult.file.mimeType
+        });
+    } catch (error) {
+        console.error('Error uploading file to Gemini:', error);
+        res.status(500).json({ success: false, error: 'Gagal mengunggah fail ke infrastruktur Google' });
+    } finally {
+        // Hukum Mutlak: Segera setelah uploadFile selesai, eksekusi fs.unlinkSync untuk mencegah memory leak di VPS
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+        }
+    }
+});
+
 // Middleware autentikasi untuk REST API
 app.use(requireAuth);
 
@@ -155,6 +292,11 @@ app.post('/api/chat', async (req, res) => {
 
         console.log(`[REST] Menerima pesan: "${prompt}"`);
         const result = await chatWithWaguri(prompt, history || []);
+
+        // Perbarui pelacak token global
+        if (result.tokenUsage && result.tokenUsage.totalTokens) {
+            dailyTokenUsage += result.tokenUsage.totalTokens;
+        }
 
         res.json({
             status: "success",
