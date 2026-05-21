@@ -152,14 +152,18 @@ io.on('connection', (socket) => {
             // Teruskan ke fungsi logika utama Gemini
             const result = await chatWithWaguri(userParts, history);
 
-            // Simpan ke riwayat memori (Sliding Window: maks 20 pesan)
-            history.push({ role: "user", parts: userParts });
-            history.push({ role: "model", parts: [{ text: result.text }] });
+            // Perbarui riwayat dengan hasil dari SDK yang sudah terstruktur rapi (termasuk function calls)
+            let newHistory = result.history || [];
 
-            while (history.length > 20) {
-                history.shift();
+            // Simpan ke riwayat memori (Sliding Window: maks 20 pesan)
+            while (newHistory.length > 20) {
+                newHistory.shift();
+                // Hukum Mutlak Gemini: Elemen pertama riwayat HARUS selalu role 'user'
+                while (newHistory.length > 0 && newHistory[0].role !== 'user') {
+                    newHistory.shift();
+                }
             }
-            userSessions.set(socket.id, history);
+            userSessions.set(socket.id, newHistory);
 
             // Perbarui pelacak token global
             if (result.tokenUsage && result.tokenUsage.totalTokens) {

@@ -128,7 +128,8 @@ export async function chatWithWaguri(prompt, chatHistory = []) {
 
         return {
             text: response.text(),
-            tokenUsage
+            tokenUsage,
+            history: await chat.getHistory()
         };
     } catch (error) {
         console.error("Error pada chatWithWaguri:", error);
