@@ -119,10 +119,10 @@ io.on('connection', (socket) => {
             // Opsional: Beritahu klien bahwa AI sedang memproses/mengetik
             socket.emit('typing', { isTyping: true });
 
-            // Mendukung data berupa string atau objek (mengandung prompt)
-            const prompt = typeof data === 'string' ? data : data.prompt;
-            const attachment = typeof data === 'string' ? null : data.attachment;
-            
+            // Mendukung data berupa string atau objek (mengandung prompt, message, atau text)
+            const prompt = typeof data === 'string' ? data : (data?.prompt || data?.message || data?.text);
+            const attachment = typeof data === 'string' ? null : data?.attachment;
+
             // Ambil riwayat obrolan dari memori
             let history = userSessions.get(socket.id) || [];
 
