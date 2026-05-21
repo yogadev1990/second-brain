@@ -21,6 +21,7 @@ import { initWatchdogStatis } from './cron/watchdog_statis.js';
 import { initWatchdogPrediktif } from './cron/watchdog_prediktif.js';
 import { initInjeksiSholat } from './cron/injeksi_sholat.js';
 import Jadwal from './models/Jadwal.js';
+import ChatSession from './models/ChatSession.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -46,8 +47,7 @@ const io = new Server(httpServer, {
     }
 });
 
-// Manajemen Ingatan Jangka Pendek (Context Window - RAM)
-const userSessions = new Map();
+// Manajemen Ingatan (Sekarang dipindahkan ke MongoDB - ChatSession)
 
 // Pelacak Token Global
 let dailyTokenUsage = 0;
@@ -102,7 +102,19 @@ io.use((socket, next) => {
 
 // Event Listener Socket.io
 io.on('connection', (socket) => {
-    console.log(`[Socket] Klien terhubung: ${socket.id}`);
+    // Ambil deviceId dari auth token/klien, atau fallback ke default
+    const deviceId = socket.handshake.auth?.deviceId || 'waguri-default-device';
+    console.log(`[Socket] Klien terhubung: ${socket.id} | Device: ${deviceId}`);
+
+    // Sinkronisasi riwayat chat dengan klien ketika pertama terhubung
+    socket.on('request_history', async () => {
+        try {
+            const session = await ChatSession.findOne({ deviceId });
+            socket.emit('chat_history_sync', session ? session.history : []);
+        } catch (error) {
+            console.error('[Socket] Error fetch history:', error.message);
+        }
+    });
 
     // Injeksi Mesin Interval (WebSocket Emitter)
     const telemetryInterval = setInterval(async () => {
@@ -123,8 +135,12 @@ io.on('connection', (socket) => {
             const prompt = typeof data === 'string' ? data : (data?.prompt || data?.message || data?.text);
             const attachment = typeof data === 'string' ? null : data?.attachment;
 
-            // Ambil riwayat obrolan dari memori
-            let history = userSessions.get(socket.id) || [];
+            // Ambil riwayat obrolan dari MongoDB (Server-side Persistence)
+            let session = await ChatSession.findOne({ deviceId });
+            if (!session) {
+                session = new ChatSession({ deviceId, history: [] });
+            }
+            let history = session.history;
 
             if (!prompt && !attachment) {
                 return socket.emit('chat_reply', { status: 'error', message: 'Pesan tidak boleh kosong' });
@@ -155,15 +171,18 @@ io.on('connection', (socket) => {
             // Perbarui riwayat dengan hasil dari SDK yang sudah terstruktur rapi (termasuk function calls)
             let newHistory = result.history || [];
 
-            // Simpan ke riwayat memori (Sliding Window: maks 20 pesan)
-            while (newHistory.length > 20) {
+            // Simpan ke riwayat memori (Sliding Window: maks 15 pesan, sesuai permintaan)
+            while (newHistory.length > 15) {
                 newHistory.shift();
                 // Hukum Mutlak Gemini: Elemen pertama riwayat HARUS selalu role 'user'
                 while (newHistory.length > 0 && newHistory[0].role !== 'user') {
                     newHistory.shift();
                 }
             }
-            userSessions.set(socket.id, newHistory);
+            
+            // Simpan kembali ke MongoDB
+            session.history = newHistory;
+            await session.save();
 
             // Perbarui pelacak token global
             if (result.tokenUsage && result.tokenUsage.totalTokens) {
@@ -190,15 +209,15 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Mekanisme Sapu Bersih
-    socket.on('clear_context', () => {
-        console.log(`[Socket][${socket.id}] Membersihkan konteks obrolan`);
-        userSessions.set(socket.id, []);
+    // Mekanisme Sapu Bersih (Manual By User)
+    socket.on('clear_context', async () => {
+        console.log(`[Socket][${socket.id}] Membersihkan konteks obrolan untuk device: ${deviceId}`);
+        await ChatSession.findOneAndUpdate({ deviceId }, { history: [] });
+        socket.emit('chat_history_sync', []); // Beritahu klien bahwa riwayat telah kosong
     });
 
     socket.on('disconnect', () => {
-        console.log(`[Socket] Klien terputus: ${socket.id}`);
-        userSessions.delete(socket.id); // Bersihkan memori saat putus
+        console.log(`[Socket] Klien terputus: ${socket.id} | Device: ${deviceId}`);
         clearInterval(telemetryInterval); // Hukum Mutlak Pencegahan Kebocoran Memori
     });
 });
