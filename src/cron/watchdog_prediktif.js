@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import Jadwal from '../models/Jadwal.js';
-import { chatWithWaguri } from '../services/geminiService.js';
+import { calculateDistanceAndRoute } from '../tools/eksternal/kalkulasiRute.js';
+import { injectProactiveMessage } from '../services/historyInjector.js';
 
 /**
  * Watchdog Prediktif — Memantau jadwal yang butuh kehadiran fisik.
@@ -120,20 +121,17 @@ export const initWatchdogPrediktif = (io) => {
                         { $set: { peringatan_macet_terkirim: true, notifikasi_terkirim: true } }
                     );
 
-                    // Susun konteks untuk Gemini
-                    let konteksMacet = '';
+                    // Susun pesan untuk pengguna menggunakan teks natural bergaya Kaoruko
+                    let textResponse = '';
                     if (adaMacet) {
-                        konteksMacet = `PERINGATAN KEMACETAN: Rute menuju "${jadwal.lokasi_tujuan || tujuan}" sedang MACET. Waktu tempuh normal ~${Math.ceil(durasiNormalDetik / 60)} menit, tapi sekarang butuh ~${menitTempuhMacet} menit (jarak: ${jarakTeks}). `;
+                        textResponse = `Sayang, rute ke "${jadwal.lokasi_tujuan || tujuan}" lagi macet nih. Jaraknya ${jarakTeks} dan butuh waktu sekitar ${menitTempuhMacet} menit. Mending kamu berangkat SEKARANG ya sayang, biar nggak telat! Hati-hati di jalan ya suamiku! 💕`;
+                    } else {
+                        textResponse = `Sayang, jadwal kamu "${jadwal.nama_kegiatan}" sisa ${menitTersisa} menit lagi di "${jadwal.lokasi_tujuan || tujuan}". Estimasi perjalanan ke sana sekitar ${durasiTeks}. Yuk mulai bersiap-siap sayang! 🥰`;
                     }
-
-                    const hiddenPrompt = `Instruksi Sistem (PENTING & MENDESAK): Berperanlah sebagai asisten proaktif yang sangat peduli. ${konteksMacet}Beritahu pengguna bahwa jadwal "${jadwal.nama_kegiatan}" dijadwalkan ${menitTersisa} menit lagi di lokasi "${jadwal.lokasi_tujuan || tujuan}". Estimasi perjalanan saat ini: ${durasiTeks} (${jarakTeks}). ${adaMacet ? 'Sarankan untuk berangkat SEKARANG karena jalanan macet.' : 'Sarankan untuk mulai bersiap-siap agar tidak terlambat.'} Buat pesannya mendesak, singkat, dan natural. Jangan sebutkan bahwa kamu adalah AI atau sistem.`;
-
-                    console.log(`[Watchdog Prediktif] 🚨 Meminta Gemini menyusun peringatan untuk "${jadwal.nama_kegiatan}"...`);
-                    const result = await chatWithWaguri(hiddenPrompt, []);
 
                     const payload = {
                         status: "success",
-                        text: result.text,
+                        response: textResponse,
                         isProactive: true,
                         isPrediktif: true, // Penanda khusus untuk UI
                         metadata: {
@@ -148,6 +146,9 @@ export const initWatchdogPrediktif = (io) => {
 
                     console.log(`[Watchdog Prediktif] 📡 Menembakkan peringatan ke UI...`);
                     io.emit('chat_reply', payload);
+                    
+                    // Suntikkan ke memori AI
+                    await injectProactiveMessage(textResponse, `Waktunya mengingatkan kondisi rute dan waktu untuk jadwal "${jadwal.nama_kegiatan}".`);
                 }
             }
         } catch (error) {

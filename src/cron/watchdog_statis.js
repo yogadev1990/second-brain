@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import Jadwal from '../models/Jadwal.js';
-import { chatWithWaguri } from '../services/geminiService.js';
+import { injectProactiveMessage } from '../services/historyInjector.js';
 
 export const initWatchdogStatis = (io) => {
     // Berjalan setiap menit
@@ -31,20 +31,20 @@ export const initWatchdogStatis = (io) => {
                 // Kunci datanya agar tidak ke-spam di menit berikutnya
                 await Jadwal.updateOne({ _id: jadwal._id }, { $set: { notifikasi_terkirim: true } });
 
-                const hiddenPrompt = `Instruksi Sistem (PENTING): Berperanlah sebagai asisten proaktif. Beritahu pengguna bahwa jadwal '${jadwal.nama_kegiatan}' akan segera dimulai. Buat pesannya singkat, mendesak, dan natural.`;
-
-                console.log(`[Watchdog Gemini] Meminta Gemini menyusun pesan...`);
-                const result = await chatWithWaguri(hiddenPrompt, []);
-                console.log(`[Watchdog Gemini] Berhasil menyusun pesan!`);
+                // Hasilkan pesan plain-text bergaya Kaoruko Waguri tanpa buang token
+                const textResponse = `Sayang, jadwal "${jadwal.nama_kegiatan}" sebentar lagi mau mulai nih. Jangan lupa siap-siap ya suamiku! 💕`;
 
                 const payload = {
                     status: "success",
-                    text: result.text,
+                    response: textResponse,
                     isProactive: true
                 };
 
                 console.log(`[Watchdog Emit] Menembakkan Socket.io ke UI...`);
                 io.emit('chat_reply', payload);
+                
+                // Suntikkan ke memori AI
+                await injectProactiveMessage(textResponse, `Waktunya mengingatkan Randa tentang jadwal "${jadwal.nama_kegiatan}".`);
             }
         } catch (error) {
             console.error('[Watchdog ERROR FATAL] Terjadi kesalahan:', error);

@@ -22,6 +22,8 @@ import { initWatchdogPrediktif } from './cron/watchdog_prediktif.js';
 import { initInjeksiSholat } from './cron/injeksi_sholat.js';
 import Jadwal from './models/Jadwal.js';
 import ChatSession from './models/ChatSession.js';
+import ServerMetrics from './models/ServerMetrics.js';
+import { initResetBulanan } from './cron/reset_bulanan.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -49,8 +51,7 @@ const io = new Server(httpServer, {
 
 // Manajemen Ingatan (Sekarang dipindahkan ke MongoDB - ChatSession)
 
-// Pelacak Token Global
-let dailyTokenUsage = 0;
+// Pelacak Token (Sekarang dipindahkan ke MongoDB - ServerMetrics)
 
 // Fungsi Pengumpul Metrik (Data Aggregator)
 async function gatherTelemetryData() {
@@ -70,17 +71,20 @@ async function gatherTelemetryData() {
     };
 
     // Parallel count (Optimized)
-    const [totalTugas, tugasSelesai] = await Promise.all([
+    const [totalTugas, tugasSelesai, metrics] = await Promise.all([
         Jadwal.countDocuments(matchToday),
-        Jadwal.countDocuments({ ...matchToday, status_selesai: true })
+        Jadwal.countDocuments({ ...matchToday, status_selesai: true }),
+        ServerMetrics.findOne({ type: 'global' })
     ]);
+
+    const monthlyTokenUsage = metrics ? metrics.monthlyTokenUsage : 0;
 
     return {
         system: {
             ramUsagePercent,
             cpuLoad,
             serverUptime,
-            dailyTokenUsage
+            monthlyTokenUsage
         },
         cognitive: {
             totalTugasHariIni: totalTugas,
@@ -184,9 +188,13 @@ io.on('connection', (socket) => {
             session.history = newHistory;
             await session.save();
 
-            // Perbarui pelacak token global
+            // Perbarui pelacak token bulanan di MongoDB
             if (result.tokenUsage && result.tokenUsage.totalTokens) {
-                dailyTokenUsage += result.tokenUsage.totalTokens;
+                await ServerMetrics.findOneAndUpdate(
+                    { type: 'global' },
+                    { $inc: { monthlyTokenUsage: result.tokenUsage.totalTokens } },
+                    { upsert: true }
+                );
             }
 
             // Kirimkan balasan kembali ke klien
@@ -227,6 +235,9 @@ initJantungKognitif(io);
 
 // Inisialisasi mesin cron Reset Tengah Malam (Rutinitas Harian)
 initResetHarian();
+
+// Inisialisasi mesin cron Reset Bulanan (Token)
+initResetBulanan();
 
 // Inisialisasi mesin cron Watchdog Statis (Alarm Jadwal Pasti)
 initWatchdogStatis(io);
@@ -316,9 +327,13 @@ app.post('/api/chat', async (req, res) => {
         console.log(`[REST] Menerima pesan: "${prompt}"`);
         const result = await chatWithWaguri(prompt, history || []);
 
-        // Perbarui pelacak token global
+        // Perbarui pelacak token bulanan di MongoDB
         if (result.tokenUsage && result.tokenUsage.totalTokens) {
-            dailyTokenUsage += result.tokenUsage.totalTokens;
+            await ServerMetrics.findOneAndUpdate(
+                { type: 'global' },
+                { $inc: { monthlyTokenUsage: result.tokenUsage.totalTokens } },
+                { upsert: true }
+            );
         }
 
         res.json({
