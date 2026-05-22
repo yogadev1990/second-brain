@@ -1,6 +1,5 @@
 import cron from 'node-cron';
 import Jadwal from '../models/Jadwal.js';
-import { calculateDistanceAndRoute } from '../tools/eksternal/kalkulasiRute.js';
 import { injectProactiveMessage } from '../services/historyInjector.js';
 
 /**
