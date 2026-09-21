@@ -1,7 +1,4 @@
-import { exec } from 'child_process';
-import util from 'util';
-
-const execPromise = util.promisify(exec);
+import Docker from 'dockerode';
 
 export const declaration = {
     name: "baca_log_docker",
@@ -25,24 +22,29 @@ export async function execute(args) {
         return { status: "error", message: "Parameter 'nama_container' wajib diisi." };
     }
 
+    // Proteksi keamanan: Validasi nama container
+    if (!/^[a-zA-Z0-9_.-]+$/.test(nama_container)) {
+        return { status: "error", message: "Nama container mengandung karakter tidak sah." };
+    }
+
     try {
-        // Pada perintah `docker logs`, informasi output dan pesan error bisa bercampur dan seringkali masuk ke stderr.
-        const { stdout, stderr } = await execPromise(`docker logs --tail 50 ${nama_container}`);
+        const docker = new Docker({ socketPath: process.env.DOCKER_SOCKET_PATH || '/var/run/docker.sock' });
+        const container = docker.getContainer(nama_container);
         
-        // Menggabungkan stdout dan stderr untuk ditangkap dengan aman
-        const output = [];
-        if (stdout) output.push(stdout.trim());
-        if (stderr) output.push(stderr.trim());
-        
-        const finalOutput = output.join('\n\n').trim();
-        
-        if (!finalOutput) {
+        const logsBuffer = await container.logs({
+            stdout: true,
+            stderr: true,
+            tail: 50
+        });
+
+        const logString = logsBuffer ? logsBuffer.toString('utf-8').trim() : '';
+
+        if (!logString) {
             return { status: "success", log: `Log container '${nama_container}' kosong.` };
         }
-        
-        return { status: "success", log: finalOutput };
+
+        return { status: "success", log: logString };
     } catch (error) {
-        // Tangkap error saat container tidak ditemukan atau exec error lainnya
         return { status: "error", message: `Gagal membaca log container '${nama_container}': ${error.message}` };
     }
 }

@@ -1,7 +1,4 @@
-import { exec } from 'child_process';
-import util from 'util';
-
-const execPromise = util.promisify(exec);
+import Docker from 'dockerode';
 
 export const declaration = {
     name: "restart_container",
@@ -25,11 +22,20 @@ export async function execute(args) {
         return { status: "error", message: "Parameter 'nama_container' wajib diisi." };
     }
 
+    // Proteksi keamanan: Validasi nama container agar aman dari injeksi
+    if (!/^[a-zA-Z0-9_.-]+$/.test(nama_container)) {
+        return { status: "error", message: "Nama container mengandung karakter tidak sah." };
+    }
+
     try {
-        const { stdout, stderr } = await execPromise(`docker restart ${nama_container}`);
-        return { status: "success", message: `Container '${nama_container}' berhasil direstart.`, output: stdout.trim() };
+        const docker = new Docker({ socketPath: process.env.DOCKER_SOCKET_PATH || '/var/run/docker.sock' });
+        const container = docker.getContainer(nama_container);
+        await container.restart();
+        return { 
+            status: "success", 
+            message: `Container '${nama_container}' berhasil direstart dengan aman via Docker API.` 
+        };
     } catch (error) {
-        // Tangkap error (misal: container tidak ada) agar tidak membuat server crash
         return { status: "error", message: `Gagal merestart container '${nama_container}': ${error.message}` };
     }
 }

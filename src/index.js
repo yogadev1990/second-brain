@@ -24,6 +24,10 @@ import Jadwal from './models/Jadwal.js';
 import ChatSession from './models/ChatSession.js';
 import ServerMetrics from './models/ServerMetrics.js';
 import { initResetBulanan } from './cron/reset_bulanan.js';
+import { masterAgent } from './agents/master/masterAgent.js';
+import { eventBus } from './core/bus/eventBus.js';
+import { TOPICS } from './core/bus/topics.js';
+import { defaultLogger } from './core/logger/index.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -248,12 +252,40 @@ initWatchdogPrediktif(io);
 // Inisialisasi mesin cron Injeksi Sholat Harian
 initInjeksiSholat();
 
+// Inisialisasi Ekosistem Master-Subagent Waguri
+await masterAgent.init(io);
+
 app.use(cors());
 app.use(express.json());
 
 // Endpoint dasar untuk cek status server
 app.get('/', (req, res) => {
     res.send('Waguri AI Server is running.');
+});
+
+// Endpoint Docker Healthcheck & Monitoring
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'healthy',
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString(),
+        redisConnected: eventBus.isConnected
+    });
+});
+
+// Webhook untuk Transaksi Toko Online (Revanda Store)
+app.post('/api/webhook/ecommerce', async (req, res) => {
+    try {
+        const payload = req.body;
+        await eventBus.publish(TOPICS.COMMERCE.TRANSACTION_WEBHOOK, {
+            sourceAgent: 'WebhookGateway',
+            action: 'ORDER_COMPLETED',
+            payload
+        });
+        res.json({ status: 'success', message: 'Webhook transaksi diterima.' });
+    } catch (err) {
+        res.status(500).json({ status: 'error', message: err.message });
+    }
 });
 
 app.get('/api/auth/google', (req, res) => {
@@ -280,8 +312,8 @@ app.get('/api/auth/google/callback', async (req, res) => {
     }
 });
 
-// Pembuatan Endpoint Ingesti (HTTP POST) untuk Multimodal
-app.post('/api/upload-media', upload.single('file'), async (req, res) => {
+// Pembuatan Endpoint Ingesti (HTTP POST) untuk Multimodal (Dilindungi requireAuth)
+app.post('/api/upload-media', requireAuth, upload.single('file'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ success: false, error: 'Tidak ada fail yang diunggah' });
     }

@@ -8,16 +8,70 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      # Mounting docker.sock agar perintah docker-cli di dalam container terhubung dengan Docker Daemon host VPS
+      # Mounting docker.sock agar Subagent Watchdog dapat memantau Docker Daemon host
       - /var/run/docker.sock:/var/run/docker.sock
+      - wiki-content-data:/app/shared/wiki_content
     env_file:
       - .env
     environment:
       - TZ=Asia/Jakarta 
       - NODE_ENV=production
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MQTT_BROKER_URL=mqtt://mosquitto:1883
+    depends_on:
+      redis:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     networks:
+      - waguri-internal
       - proxy-net
 
+  redis:
+    image: redis:7.2-alpine
+    container_name: waguri-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - waguri-internal
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: waguri-mosquitto
+    restart: always
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -i healthcheck || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - waguri-internal
+
 networks:
+  waguri-internal:
+    driver: bridge
   proxy-net:
     external: true
+
+volumes:
+  mosquitto-data:
+  wiki-content-data:

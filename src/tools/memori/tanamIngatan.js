@@ -37,7 +37,7 @@ export async function execute(args) {
         const promptTagging = `Ekstrak teks berikut ke dalam JSON murni yang berisi 'kategori' (pilih satu: Jurnal, Proyek, Log_Aktivitas, Ide, Fakta_Pribadi) dan 'tags' (array 3 kata kunci). Jangan berikan teks lain. Teks: ${teks_mentah}`;
         
         const taggingResult = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-flash-latest',
             contents: promptTagging,
             config: {
                 responseMimeType: "application/json",

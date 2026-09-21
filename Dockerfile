@@ -1,7 +1,7 @@
 FROM node:20-alpine
 
-# Pasang docker-cli agar backend Waguri dapat memanggil perintah "docker ps", "docker restart", dll.
-RUN apk add --no-cache docker-cli
+# Pasang docker-cli dan git agar backend Waguri dapat memanggil Docker API serta Git Checkpoint/Rollback
+RUN apk add --no-cache docker-cli git
 
 WORKDIR /app
 
