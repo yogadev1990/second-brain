@@ -364,9 +364,19 @@ export class ContainerUpdaterService {
     }
 
     async buildImage(candidateImageTag, targetHostDir) {
-        await execAsync(`docker build -t ${candidateImageTag} "${targetHostDir}"`, {
-            env: { ...process.env, DOCKER_BUILDKIT: '1' }
-        });
+        try {
+            await execAsync(`docker build -t ${candidateImageTag} "${targetHostDir}"`);
+        } catch (err) {
+            // Jika buildx belum terpasang atau rusak saat BuildKit aktif, fallback otomatis ke mode legacy
+            if (err.message && (err.message.includes('buildx') || err.message.includes('BuildKit'))) {
+                logger.warn({ err: err.message }, 'Komponen buildx tidak ditemukan atau rusak. Mencoba fallback ke DOCKER_BUILDKIT=0...');
+                await execAsync(`docker build -t ${candidateImageTag} "${targetHostDir}"`, {
+                    env: { ...process.env, DOCKER_BUILDKIT: '0' }
+                });
+            } else {
+                throw err;
+            }
+        }
     }
 
     async createGitCheckpoint(targetHostDir, tag) {
