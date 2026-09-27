@@ -381,17 +381,28 @@ export class ContainerUpdaterService {
                 const exposedPorts = Object.keys(inspect.Config?.ExposedPorts || {});
                 const targetPort = exposedPorts[0] ? exposedPorts[0].split('/')[0] : '3000';
 
-                // 3. Coba eksekusi probe HTTP internal (wget atau curl) tanpa false-positive exit 0
+                // 3. Coba eksekusi probe HTTP internal (wget atau curl) tanpa deadlock
                 try {
                     const execInst = await container.exec({
-                        Cmd: ['sh', '-c', `wget -q -O - http://localhost:${targetPort}/health || curl -sf http://localhost:${targetPort}/health`],
+                        Cmd: ['sh', '-c', `wget -q -O - http://127.0.0.1:${targetPort}/health || curl -sf http://127.0.0.1:${targetPort}/health`],
                         AttachStdout: true,
                         AttachStderr: true
                     });
-                    const stream = await execInst.start();
-                    await new Promise(r => stream.on('end', r));
+                    const stream = await execInst.start({ Detach: false, Tty: false });
+                    await new Promise((resolve) => {
+                        const timer = setTimeout(resolve, 3000);
+                        if (stream && typeof stream.on === 'function') {
+                            stream.on('end', () => { clearTimeout(timer); resolve(); });
+                            stream.on('close', () => { clearTimeout(timer); resolve(); });
+                            stream.on('error', () => { clearTimeout(timer); resolve(); });
+                            if (typeof stream.resume === 'function') stream.resume();
+                        } else {
+                            clearTimeout(timer);
+                            resolve();
+                        }
+                    });
                     const execData = await execInst.inspect();
-                    if (execData.ExitCode === 0) {
+                    if (execData?.ExitCode === 0) {
                         return true;
                     }
                 } catch (_) {
@@ -490,7 +501,18 @@ export class ContainerUpdaterService {
         const additionalNetworks = allNetworks.slice(1);
 
         const bindArgs = (targetBinds || []).map(b => `-v "${b}"`).join(' ');
-        const envArgs = (envVars || []).map(e => `-e "${e}"`).join(' ');
+        
+        // Escape variabel lingkungan secara aman dengan format POSIX single quotes
+        const envArgs = (envVars || [])
+            .filter(e => !e.startsWith('PATH=') && !e.startsWith('NODE_VERSION=') && !e.startsWith('YARN_VERSION='))
+            .map(e => {
+                const eqIdx = e.indexOf('=');
+                if (eqIdx === -1) return `-e ${e}`;
+                const k = e.slice(0, eqIdx);
+                const v = e.slice(eqIdx + 1);
+                return `-e ${k}='${v.replace(/'/g, "'\\''")}'`;
+            })
+            .join(' ');
 
         let portArgs = '-p 3000:3000';
         if (portBindings && Object.keys(portBindings).length > 0) {
@@ -523,12 +545,19 @@ export class ContainerUpdaterService {
                 HostConfig: {
                     Binds: ['/var/run/docker.sock:/var/run/docker.sock'],
                     NetworkMode: primaryNetwork,
-                    AutoRemove: true
+                    AutoRemove: false // Tetap ada sesaat agar log swapper dapat diperiksa jika ada kendala
                 }
             });
 
             await swapper.start();
             logger.info('✅ Swapper Daemon berhasil diluncurkan di background.');
+
+            // Jadwalkan pembersihan kontainer swapper setelah 20 detik
+            setTimeout(async () => {
+                try {
+                    await swapper.remove({ force: true }).catch(() => {});
+                } catch (_) {}
+            }, 20000);
         } catch (swapperErr) {
             logger.error({ err: swapperErr.message }, 'Gagal meluncurkan Swapper Daemon.');
             throw swapperErr;
@@ -565,11 +594,14 @@ export class ContainerUpdaterService {
     }
 
     async emitChatroomLog(status, message) {
-        await eventBus.publish(TOPICS.DEVOPS.CHATROOM || 'waguri:chatroom', {
-            agentName: 'WaguriContainerUpdater',
-            status,
-            message
-        });
+        logger.info({ status }, `📢 [Updater] ${message}`);
+        try {
+            await eventBus.publish(TOPICS.DEVOPS.CHATROOM || 'waguri:chatroom', {
+                agentName: 'WaguriContainerUpdater',
+                status,
+                message
+            });
+        } catch (_) {}
     }
 }
 
