@@ -96,7 +96,6 @@ export class CoderService {
                     '--message', taskDescription,
                     '--yes-always',
                     '--no-check-update',
-                    '--no-git-commit-prompt',
                     '--no-show-release-notes'
                 ],
                 HostConfig: {

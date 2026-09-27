@@ -451,8 +451,10 @@ export class ContainerUpdaterService {
             }
         }
 
+        logger.info({ candidateImageTag, targetHostDir }, '🔨 Menjalankan docker build di Docker Daemon host...');
         try {
             await execAsync(`docker build -t ${candidateImageTag} "${targetHostDir}"`);
+            logger.info({ candidateImageTag }, '✅ Build image kandidat berhasil diselesaikan.');
         } catch (err) {
             // Jika buildx belum terpasang atau rusak saat BuildKit aktif, fallback otomatis ke mode legacy
             if (err.message && (err.message.includes('buildx') || err.message.includes('BuildKit'))) {
@@ -460,6 +462,7 @@ export class ContainerUpdaterService {
                 await execAsync(`docker build -t ${candidateImageTag} "${targetHostDir}"`, {
                     env: { ...process.env, DOCKER_BUILDKIT: '0' }
                 });
+                logger.info({ candidateImageTag }, '✅ Build image kandidat berhasil (mode legacy DOCKER_BUILDKIT=0).');
             } else {
                 throw err;
             }
