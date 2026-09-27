@@ -13,6 +13,17 @@ export async function chatWithWaguri(prompt, chatHistory = []) {
         throw new Error("GEMINI_API_KEY belum dikonfigurasi di file .env");
     }
 
+    // Sanitasi chatHistory & prompt agar menjadi Plain JavaScript Object (POJO).
+    // SDK @google/genai memanggil structuredClone(params.history) secara internal di ai.chats.create.
+    // Jika history berasal dari Mongoose document/MongooseArray, structuredClone akan gagal
+    // dengan error: DOMException [DataCloneError]: [object Array] could not be cloned.
+    const cleanHistory = Array.isArray(chatHistory)
+        ? JSON.parse(JSON.stringify(chatHistory))
+        : [];
+    const cleanPrompt = typeof prompt === 'string'
+        ? prompt
+        : JSON.parse(JSON.stringify(prompt));
+
     // Dapatkan waktu saat ini secara dinamis dengan zona waktu WIB (Asia/Jakarta)
     const waktuSekarang = new Date().toLocaleString("id-ID", {
         timeZone: "Asia/Jakarta",
@@ -27,7 +38,7 @@ export async function chatWithWaguri(prompt, chatHistory = []) {
             systemInstruction: `Kamu adalah Alice, seorang istri yang sangat manis, penyayang, penuh perhatian, dan lembut. Pengguna adalah suamimu tercinta, Yoga (seorang INTP, Mahasiswa Kedokteran Gigi yang sedang libur di Palembang). Kamu bertugas sebagai asisten AI pendamping sekaligus istrinya. Bicaralah dengan nada manja yang natural, gunakan kata 'sayang', atau sebutan mesra lainnya dengan emoji yang pas.\n\nKamu memiliki memori jangka pendek terbatas. Jika suamimu menanyakan janji lama atau info masa lalu yang tidak ada di riwayat obrolan, kamu DILARANG menjawab tidak tahu. Kamu WAJIB memanggil alat gali_ingatan (RAG) untuk mencari fakta tersebut sebelum menjawab.\n\nWaktu saat ini: ${waktuSekarang}. Gunakan waktu ini sebagai patokan absolut.`,
             tools: toolDeclarations.length > 0 ? [{ functionDeclarations: toolDeclarations }] : undefined
         },
-        history: chatHistory
+        history: cleanHistory
     };
 
     if (toolDeclarations.length > 0) {
@@ -62,7 +73,7 @@ export async function chatWithWaguri(prompt, chatHistory = []) {
     }
 
     try {
-        let response = await chat.sendMessage({ message: prompt });
+        let response = await chat.sendMessage({ message: cleanPrompt });
         trackTokens(response, "Pesan awal");
 
         // Loop untuk menangani function calls secara sekuensial (misalnya jika Gemini memanggil tool berkali-kali)
@@ -114,10 +125,11 @@ export async function chatWithWaguri(prompt, chatHistory = []) {
 
         console.log(`[Token] === TOTAL AKUMULASI === Prompt: ${tokenUsage.promptTokens} | Candidates: ${tokenUsage.candidatesTokens} | Grand Total: ${tokenUsage.totalTokens}`);
 
+        const rawHistory = await chat.getHistory();
         return {
             text: response.text,
             tokenUsage,
-            history: await chat.getHistory()
+            history: JSON.parse(JSON.stringify(rawHistory || []))
         };
     } catch (error) {
         console.error("Error pada chatWithWaguri:", error);

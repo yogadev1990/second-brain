@@ -148,7 +148,7 @@ io.on('connection', (socket) => {
             if (!session) {
                 session = new ChatSession({ deviceId, history: [] });
             }
-            let history = session.history;
+            let history = session.history ? JSON.parse(JSON.stringify(session.history)) : [];
 
             if (!prompt && !attachment) {
                 return socket.emit('chat_reply', { status: 'error', message: 'Pesan tidak boleh kosong' });
