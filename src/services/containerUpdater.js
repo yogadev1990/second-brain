@@ -531,7 +531,7 @@ export class ContainerUpdaterService {
 
         const swapScript = [
             'set -e',
-            'sleep 1',
+            'sleep 4',
             `echo "[Swapper] Menghentikan kontainer uji kandidat ${candidateContainerName}..."`,
             `docker rm -f ${candidateContainerName} || true`,
             `echo "[Swapper] Menghentikan kontainer lama ${containerName}..."`,

@@ -201,11 +201,16 @@ io.on('connection', (socket) => {
             }
 
             // Kirimkan balasan kembali ke klien
-            socket.emit('chat_reply', {
+            const replyPayload = {
                 status: "success",
                 response: result.text,
                 tokenUsage: result.tokenUsage
-            });
+            };
+            if (result.restartSign) {
+                replyPayload.restartSign = result.restartSign;
+                replyPayload.systemAction = 'RESTARTING';
+            }
+            socket.emit('chat_reply', replyPayload);
 
         } catch (error) {
             console.error(`[Socket][${socket.id}] Error:`, error.message);

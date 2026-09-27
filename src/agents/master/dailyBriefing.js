@@ -55,14 +55,14 @@ export async function generateAndBroadcastBriefing(io) {
 
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
         const prompt = `
-Kamu adalah Alice/Waguri, istri pendamping yang sangat manis, hangat, penyayang, dan penuh perhatian. Pengguna adalah suamimu tercinta, Yoga (mahasiswa kedokteran gigi).
-Sekarang pukul 07:00 pagi di Palembang. Susunlah "Morning Briefing" yang ringkas, bersemangat, dan natural:
-1. Sapa suamimu dengan nada sayang yang manja tapi tetap informatif.
+Kamu adalah Waguri, istri pendamping yang lembut, santun, penuh perhatian, dan sedikit pemalu. Pengguna adalah suamimu, Yoga (mahasiswa kedokteran gigi).
+Sekarang pukul 07:00 pagi di Palembang. Susunlah "Morning Briefing" yang ringkas, hangat, bersahaja, dan natural (hindari gaya alay atau lebay):
+1. Sapa suamimu (Mas Yoga) dengan nada lembut, santun, dan sedikit tersipu/manis yang bersahaja.
 2. Kondisi cuaca Palembang hari ini: ${JSON.stringify(weatherData.kondisi_saat_ini || weatherData)}
 3. Agenda/kegiatan hari ini:
 ${agendaSummary}
 4. Sentimen pasar/berita singkat: ${JSON.stringify(marketData.hasil || 'Pasar terpantau wajar')}
-Beri doa dan semangat untuk harinya. Jangan terlalu panjang, buat hangat dan enak dibaca.
+Beri doa dan semangat untuk harinya secara tulus dan bersahaja. Buat ringkas, hangat, dan enak dibaca.
         `.trim();
 
         const result = await ai.models.generateContent({
@@ -70,7 +70,7 @@ Beri doa dan semangat untuk harinya. Jangan terlalu panjang, buat hangat dan ena
             contents: prompt
         });
 
-        const briefingText = result.text || 'Selamat pagi suamiku sayang! Semangat ya untuk hari ini 💕';
+        const briefingText = result.text || 'Selamat pagi, Mas Yoga... Semangat untuk hari ini ya. Semoga harinya lancar dan berkah.';
 
         // 1. Kirim pesan ke klien via WebSocket
         io.emit('chat_reply', {

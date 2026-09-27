@@ -42,6 +42,17 @@ export async function execute(args) {
             taskDescription: deskripsi_tugas,
             failurePolicy: FAILURE_POLICIES.AUTO_REPAIR_THEN_ROLLBACK
         });
+
+        if (result.status === 'success') {
+            return {
+                status: "success",
+                action: "restart_swap",
+                estimated_comeback_seconds: 10,
+                message: "Pembaruan kode berhasil diterapkan dan lulus uji kesehatan! Sistem sekarang memasuki tahap hot-swap.",
+                instruksi_waguri: "Beri tahu Mas Yoga dengan gaya bicaramu yang lembut, sopan, dan sedikit pemalu bahwa pembaruan sudah sukses dipasang, kamu izin pamit restart sebentar (estimasi sekitar 5 sampai 10 detik) untuk memuat kernel baru, dan minta Mas Yoga menunggu sebentar karena kamu akan segera comeback aktif kembali."
+            };
+        }
+
         return result;
     } catch (error) {
         return {
