@@ -85,14 +85,29 @@ export class MasterAgent {
             );
         });
 
-        // Dengarkan siaran jurnal dari Ephemeral Coder di chatroom dan teruskan ke WebSocket
+        // Dengarkan siaran jurnal dari Ephemeral Coder / ContainerUpdater di chatroom dan teruskan ke WebSocket
         await eventBus.subscribe(TOPICS.DEVOPS.CHATROOM || 'waguri:chatroom', async (event) => {
             const rawPayload = event.payload || event;
             if (rawPayload?.agentName && rawPayload?.message) {
+                const logData = {
+                    agentName: rawPayload.agentName,
+                    status: rawPayload.status || 'working', // 'thinking' | 'working' | 'reporting' | 'done'
+                    message: rawPayload.message,
+                    timestamp: new Date().toISOString()
+                };
+
+                // 1. Pancarkan ke event dedicated 'upgrade_log'
+                if (this.io) {
+                    this.io.emit('upgrade_log', logData);
+                }
+
+                // 2. Teruskan juga ke 'chat_reply' dengan flag sistem log eksplisit (agar tidak memicu animasi typing/bubble chat biasa)
                 this.broadcastToClients({
                     status: 'success',
-                    type: 'CHATROOM_LOG',
-                    data: rawPayload
+                    type: 'UPGRADE_LOG',
+                    isSystemLog: true,
+                    noTyping: true,
+                    data: logData
                 });
             }
         });
