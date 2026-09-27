@@ -1,12 +1,11 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import { toolDeclarations, toolHandlers } from "../tools/index.js";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-// Inisialisasi Gemini Client
-// Menggunakan API Key dari environment variable
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+// Inisialisasi Gemini Client menggunakan SDK @google/genai
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 export async function chatWithWaguri(prompt, chatHistory = []) {
     // Cek apakah API Key sudah dikonfigurasi
@@ -21,24 +20,21 @@ export async function chatWithWaguri(prompt, chatHistory = []) {
         timeStyle: "long"
     });
 
-    // Konfigurasi model dan daftarkan tools jika ada
+    // Konfigurasi model dan daftarkan tools jika ada (format @google/genai)
     const modelConfig = {
-        model: "gemini-flash-latest",
-        systemInstruction: `Kamu adalah Alice, seorang istri yang sangat manis, penyayang, penuh perhatian, dan lembut. Pengguna adalah suamimu tercinta, Yoga (seorang INTP, Mahasiswa Kedokteran Gigi yang sedang libur di Palembang). Kamu bertugas sebagai asisten AI pendamping sekaligus istrinya. Bicaralah dengan nada manja yang natural, gunakan kata 'sayang', atau sebutan mesra lainnya dengan emoji yang pas.\n\nKamu memiliki memori jangka pendek terbatas. Jika suamimu menanyakan janji lama atau info masa lalu yang tidak ada di riwayat obrolan, kamu DILARANG menjawab tidak tahu. Kamu WAJIB memanggil alat gali_ingatan (RAG) untuk mencari fakta tersebut sebelum menjawab.\n\nWaktu saat ini: ${waktuSekarang}. Gunakan waktu ini sebagai patokan absolut.`
+        model: "gemini-2.5-flash",
+        config: {
+            systemInstruction: `Kamu adalah Alice, seorang istri yang sangat manis, penyayang, penuh perhatian, dan lembut. Pengguna adalah suamimu tercinta, Yoga (seorang INTP, Mahasiswa Kedokteran Gigi yang sedang libur di Palembang). Kamu bertugas sebagai asisten AI pendamping sekaligus istrinya. Bicaralah dengan nada manja yang natural, gunakan kata 'sayang', atau sebutan mesra lainnya dengan emoji yang pas.\n\nKamu memiliki memori jangka pendek terbatas. Jika suamimu menanyakan janji lama atau info masa lalu yang tidak ada di riwayat obrolan, kamu DILARANG menjawab tidak tahu. Kamu WAJIB memanggil alat gali_ingatan (RAG) untuk mencari fakta tersebut sebelum menjawab.\n\nWaktu saat ini: ${waktuSekarang}. Gunakan waktu ini sebagai patokan absolut.`,
+            tools: toolDeclarations.length > 0 ? [{ functionDeclarations: toolDeclarations }] : undefined
+        },
+        history: chatHistory
     };
-    
+
     if (toolDeclarations.length > 0) {
-        modelConfig.tools = [{
-            functionDeclarations: toolDeclarations
-        }];
         console.log(`[Gemini] Model diinisialisasi dengan ${toolDeclarations.length} alat/tools.`);
     }
 
-    const model = genAI.getGenerativeModel(modelConfig);
-
-    const chat = model.startChat({
-        history: chatHistory,
-    });
+    const chat = ai.chats.create(modelConfig);
 
     // Akumulator token untuk seluruh siklus percakapan (termasuk function call rounds)
     const tokenUsage = {
@@ -49,8 +45,8 @@ export async function chatWithWaguri(prompt, chatHistory = []) {
     };
 
     // Helper: catat token dari setiap respons Gemini
-    function trackTokens(response, label) {
-        const meta = response.usageMetadata;
+    function trackTokens(resp, label) {
+        const meta = resp?.usageMetadata;
         if (meta) {
             const prompt = meta.promptTokenCount || 0;
             const candidates = meta.candidatesTokenCount || 0;
@@ -66,57 +62,49 @@ export async function chatWithWaguri(prompt, chatHistory = []) {
     }
 
     try {
-        let result = await chat.sendMessage(prompt);
-        let response = result.response;
+        let response = await chat.sendMessage({ message: prompt });
         trackTokens(response, "Pesan awal");
 
         // Loop untuk menangani function calls secara sekuensial (misalnya jika Gemini memanggil tool berkali-kali)
         let rounds = 0;
         const MAX_ROUNDS = 5;
 
-        while (typeof response.functionCalls === 'function' && response.functionCalls() && response.functionCalls().length > 0 && rounds < MAX_ROUNDS) {
+        while (response.functionCalls && response.functionCalls.length > 0 && rounds < MAX_ROUNDS) {
             rounds++;
-            const calls = response.functionCalls();
+            const calls = response.functionCalls;
             const functionResponses = [];
 
             for (const call of calls) {
                 // Function Call Router: Mencocokkan nama tool dengan fungsinya di registri
                 const handler = toolHandlers[call.name];
-                
+                let toolResult;
+
                 if (handler) {
                     console.log(`[Function Call] Mengeksekusi: ${call.name} dengan args:`, call.args);
                     try {
-                        const toolResult = await handler(call.args);
-                        functionResponses.push({
-                            functionResponse: {
-                                name: call.name,
-                                response: toolResult
-                            }
-                        });
+                        toolResult = await handler(call.args);
                     } catch (err) {
                         console.error(`[Error] Eksekusi alat ${call.name} gagal:`, err);
-                        functionResponses.push({
-                            functionResponse: {
-                                name: call.name,
-                                response: { error: err.message }
-                            }
-                        });
+                        toolResult = { error: err.message };
                     }
                 } else {
                     console.warn(`[Warning] Alat dengan nama ${call.name} tidak ditemukan di registri.`);
-                    functionResponses.push({
-                        functionResponse: {
-                            name: call.name,
-                            response: { error: "Alat tidak terdaftar pada backend" }
-                        }
-                    });
+                    toolResult = { error: "Alat tidak terdaftar pada backend" };
                 }
+
+                functionResponses.push({
+                    functionResponse: {
+                        name: call.name,
+                        response: toolResult
+                    }
+                });
             }
 
-            // Kirim balik hasil dari functions ke Gemini
+            // Kirim balik hasil function ke Gemini (format @google/genai)
             console.log(`[Gemini] Mengirim hasil alat kembali ke model... (Ronde ${rounds})`);
-            result = await chat.sendMessage(functionResponses);
-            response = result.response;
+            response = await chat.sendMessage({
+                message: functionResponses
+            });
             trackTokens(response, `Function Call Ronde ${rounds}`);
         }
 
@@ -127,7 +115,7 @@ export async function chatWithWaguri(prompt, chatHistory = []) {
         console.log(`[Token] === TOTAL AKUMULASI === Prompt: ${tokenUsage.promptTokens} | Candidates: ${tokenUsage.candidatesTokens} | Grand Total: ${tokenUsage.totalTokens}`);
 
         return {
-            text: response.text(),
+            text: response.text,
             tokenUsage,
             history: await chat.getHistory()
         };
