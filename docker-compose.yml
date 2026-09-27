@@ -32,7 +32,7 @@ services:
       start_period: 15s
     networks:
       - waguri-internal
-      - proxy-net
+      - proxy-network
 
   redis:
     image: redis:7.2-alpine
@@ -69,7 +69,7 @@ services:
 networks:
   waguri-internal:
     driver: bridge
-  proxy-net:
+  proxy-network:
     external: true
 
 volumes:

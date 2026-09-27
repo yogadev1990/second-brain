@@ -223,23 +223,56 @@ export class ContainerUpdaterService {
             // -------------------------------------------------------------
             await this.emitChatroomLog('reporting', `Kontainer kandidat 100% SEHAT! Memulai proses Hot-Swap tanpa downtime...`);
 
-            // Hentikan kontainer lama
-            if (currentContainer && currentInspect?.State?.Running) {
-                logger.info({ containerName }, 'Menghentikan kontainer produksi lama...');
-                await currentContainer.stop({ t: 5 }).catch(() => {});
-                await currentContainer.remove({ force: true }).catch(() => {});
-            }
-
-            // Promosikan kontainer kandidat menjadi nama resmi
-            await candidateContainer.rename({ name: containerName }).catch(() => {});
-
-            // Bersihkan git checkpoint tag karena update sukses
-            if (gitCheckpointCreated) {
-                await this.clearGitCheckpoint(targetHostDir, gitCheckpointTag);
-            }
-
+            const allNetworks = Object.keys(currentInspect?.NetworkSettings?.Networks || {});
             const successMsg = `🎉 Pembaruan kontainer '${containerName}' SUKSES! Versi baru telah aktif secara resmi tanpa downtime.`;
-            await this.emitChatroomLog('done', successMsg);
+
+            if (isSelfContainer) {
+                // Untuk Waguri sendiri (self-evolution):
+                // Kirim notifikasi sukses DULUAN ke user/chatroom sebelum kontainer lama diganti
+                await this.emitChatroomLog('done', successMsg);
+
+                // Bersihkan git checkpoint tag karena update sukses
+                if (gitCheckpointCreated) {
+                    await this.clearGitCheckpoint(targetHostDir, gitCheckpointTag);
+                }
+
+                // Delegasikan proses swap ke Swapper Daemon terpisah agar proses Node saat ini tidak bunuh diri sebelum selesai
+                await this.executeSelfSwap({
+                    containerName,
+                    candidateContainerName,
+                    candidateImageTag,
+                    targetBinds,
+                    allNetworks,
+                    envVars: currentInspect?.Config?.Env || ['NODE_ENV=production', 'TZ=Asia/Jakarta'],
+                    portBindings: currentInspect?.HostConfig?.PortBindings
+                });
+            } else {
+                // Untuk kontainer layanan lain (misal revandastore-app, wiki-web):
+                // Hubungkan kandidat ke seluruh network tambahan target (misal proxy-network)
+                for (let i = 1; i < allNetworks.length; i++) {
+                    try {
+                        const net = this.docker.getNetwork(allNetworks[i]);
+                        await net.connect({ Container: candidateContainer.id });
+                    } catch (_) {}
+                }
+
+                // Hentikan kontainer lama
+                if (currentContainer && currentInspect?.State?.Running) {
+                    logger.info({ containerName }, 'Menghentikan kontainer produksi lama...');
+                    await currentContainer.stop({ t: 5 }).catch(() => {});
+                    await currentContainer.remove({ force: true }).catch(() => {});
+                }
+
+                // Promosikan kontainer kandidat menjadi nama resmi
+                await candidateContainer.rename({ name: containerName }).catch(() => {});
+
+                // Bersihkan git checkpoint tag karena update sukses
+                if (gitCheckpointCreated) {
+                    await this.clearGitCheckpoint(targetHostDir, gitCheckpointTag);
+                }
+
+                await this.emitChatroomLog('done', successMsg);
+            }
 
             return {
                 status: 'success',
@@ -399,6 +432,72 @@ export class ContainerUpdaterService {
             } else {
                 throw err;
             }
+        }
+    }
+
+    /**
+     * Menjalankan Hot-Swap mandiri untuk Waguri (secondbrain) via Swapper Daemon ephemeral.
+     * Swapper Daemon berjalan di kontainer terpisah agar secondbrain lama dapat dimatikan
+     * dan secondbrain baru dapat dinyalakan dengan port binding 3000:3000 serta multi-network
+     * (waguri-internal dan proxy-network) tanpa downtime.
+     */
+    async executeSelfSwap({
+        containerName,
+        candidateContainerName,
+        candidateImageTag,
+        targetBinds,
+        allNetworks,
+        envVars,
+        portBindings
+    }) {
+        logger.info({ containerName, candidateImageTag }, '🚀 Menjalankan Swapper Daemon untuk self-swap zero-downtime...');
+
+        const primaryNetwork = allNetworks[0] || 'waguri-internal';
+        const additionalNetworks = allNetworks.slice(1);
+
+        const bindArgs = (targetBinds || []).map(b => `-v "${b}"`).join(' ');
+        const envArgs = (envVars || []).map(e => `-e "${e}"`).join(' ');
+
+        let portArgs = '-p 3000:3000';
+        if (portBindings && Object.keys(portBindings).length > 0) {
+            portArgs = Object.entries(portBindings).map(([cPort, hPorts]) => {
+                const hostPort = hPorts[0]?.HostPort || cPort.split('/')[0];
+                return `-p ${hostPort}:${cPort.split('/')[0]}`;
+            }).join(' ');
+        }
+
+        const networkConnectCmds = additionalNetworks.map(net => `docker network connect ${net} ${containerName} || true;`).join(' ');
+
+        const swapScript = [
+            'sleep 1',
+            `echo "[Swapper] Menghentikan kontainer uji kandidat ${candidateContainerName}..."`,
+            `docker rm -f ${candidateContainerName} || true`,
+            `echo "[Swapper] Menghentikan kontainer lama ${containerName}..."`,
+            `docker stop -t 3 ${containerName} || true`,
+            `docker rm -f ${containerName} || true`,
+            `echo "[Swapper] Meluncurkan kontainer baru ${containerName}..."`,
+            `docker run -d --name ${containerName} --restart always ${portArgs} --network ${primaryNetwork} ${bindArgs} ${envArgs} ${candidateImageTag}`,
+            networkConnectCmds,
+            `echo "[Swapper] Hotswap selesai! Kontainer ${containerName} resmi aktif."`
+        ].filter(Boolean).join(' && ');
+
+        try {
+            const swapper = await this.docker.createContainer({
+                Image: candidateImageTag,
+                name: `waguri-swapper-${Date.now()}`,
+                Cmd: ['sh', '-c', swapScript],
+                HostConfig: {
+                    Binds: ['/var/run/docker.sock:/var/run/docker.sock'],
+                    NetworkMode: primaryNetwork,
+                    AutoRemove: true
+                }
+            });
+
+            await swapper.start();
+            logger.info('✅ Swapper Daemon berhasil diluncurkan di background.');
+        } catch (swapperErr) {
+            logger.error({ err: swapperErr.message }, 'Gagal meluncurkan Swapper Daemon.');
+            throw swapperErr;
         }
     }
 

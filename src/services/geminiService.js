@@ -7,19 +7,64 @@ dotenv.config();
 // Inisialisasi Gemini Client menggunakan SDK @google/genai
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
+/**
+ * Membersihkan riwayat obrolan agar selalu mematuhi aturan ketat Gemini API:
+ * 1. Setiap functionResponse pada role 'user' HARUS tepat didahului oleh functionCall pada role 'model'.
+ * 2. Setiap functionCall pada role 'model' HARUS tepat diikuti oleh functionResponse pada role 'user'.
+ * 3. Elemen pertama riwayat HARUS selalu bertipe role 'user'.
+ */
+function sanitizeGeminiHistory(rawHistory) {
+    if (!Array.isArray(rawHistory) || rawHistory.length === 0) return [];
+    
+    const valid = [];
+    for (let i = 0; i < rawHistory.length; i++) {
+        const turn = rawHistory[i];
+        if (!turn || !turn.role || !Array.isArray(turn.parts)) continue;
+
+        // Cek jika turn user punya functionResponse
+        const hasFunctionResponse = turn.parts.some(p => p.functionResponse);
+        if (hasFunctionResponse) {
+            const prevTurn = valid[valid.length - 1];
+            const prevHasFunctionCall = prevTurn?.role === 'model' && prevTurn.parts.some(p => p.functionCall);
+            if (!prevHasFunctionCall) {
+                // Buang functionResponse yatim piatu agar tidak memicu 400 INVALID_ARGUMENT
+                continue;
+            }
+        }
+
+        // Cek jika turn model punya functionCall
+        const hasFunctionCall = turn.parts.some(p => p.functionCall);
+        if (hasFunctionCall) {
+            const nextTurn = rawHistory[i + 1];
+            const nextHasFunctionResponse = nextTurn?.role === 'user' && nextTurn.parts.some(p => p.functionResponse);
+            if (!nextHasFunctionResponse) {
+                // Buang functionCall yang belum selesai / tidak ada responnya
+                continue;
+            }
+        }
+
+        valid.push(turn);
+    }
+
+    // Pastikan turn pertama adalah role 'user'
+    while (valid.length > 0 && valid[0].role !== 'user') {
+        valid.shift();
+    }
+
+    return valid;
+}
+
 export async function chatWithWaguri(prompt, chatHistory = []) {
     // Cek apakah API Key sudah dikonfigurasi
     if (!process.env.GEMINI_API_KEY) {
         throw new Error("GEMINI_API_KEY belum dikonfigurasi di file .env");
     }
 
-    // Sanitasi chatHistory & prompt agar menjadi Plain JavaScript Object (POJO).
-    // SDK @google/genai memanggil structuredClone(params.history) secara internal di ai.chats.create.
-    // Jika history berasal dari Mongoose document/MongooseArray, structuredClone akan gagal
-    // dengan error: DOMException [DataCloneError]: [object Array] could not be cloned.
-    const cleanHistory = Array.isArray(chatHistory)
+    // Sanitasi chatHistory & prompt agar valid dan mematuhi skema Gemini
+    const pojoHistory = Array.isArray(chatHistory)
         ? JSON.parse(JSON.stringify(chatHistory))
         : [];
+    const cleanHistory = sanitizeGeminiHistory(pojoHistory);
     const cleanPrompt = typeof prompt === 'string'
         ? prompt
         : JSON.parse(JSON.stringify(prompt));
