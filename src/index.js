@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { chatWithWaguri } from './services/geminiService.js';
+import { chatWithWaguri, sanitizeGeminiHistory } from './services/geminiService.js';
 import { requireAuth } from './middleware/auth.js';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
@@ -154,6 +154,17 @@ io.on('connection', (socket) => {
                 return socket.emit('chat_reply', { status: 'error', message: 'Pesan tidak boleh kosong' });
             }
 
+            // Fitur Cepat: Bersihkan memori obrolan jika pengguna mengirimkan perintah reset
+            if (typeof prompt === 'string' && (prompt.trim() === '/clear' || prompt.trim().toLowerCase() === 'reset memori')) {
+                console.log(`[Socket][${socket.id}] Perintah reset memori diterima.`);
+                await ChatSession.updateOne({ deviceId }, { $set: { history: [] } });
+                socket.emit('chat_history_sync', []);
+                return socket.emit('chat_reply', {
+                    status: "success",
+                    response: "Riwayat percakapan telah berhasil dibersihkan, Mas Yoga."
+                });
+            }
+
             console.log(`[Socket][${socket.id}] Menerima pesan dari klien.`);
 
             // Cek apakah ada attachment
@@ -176,8 +187,8 @@ io.on('connection', (socket) => {
             // Teruskan ke fungsi logika utama Gemini
             const result = await chatWithWaguri(userParts, history);
 
-            // Perbarui riwayat dengan hasil dari SDK yang sudah terstruktur rapi (termasuk function calls)
-            let newHistory = result.history || [];
+            // Saring riwayat obrolan agar hanya menyimpan dialog percakapan teks bersih (anti-korupsi function calls)
+            let newHistory = sanitizeGeminiHistory(result.history || []);
 
             // Simpan ke riwayat memori (Sliding Window: maks 15 pesan, sesuai permintaan)
             while (newHistory.length > 15) {
