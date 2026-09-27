@@ -534,6 +534,8 @@ export class ContainerUpdaterService {
             `echo "[Swapper] Meluncurkan kontainer baru ${containerName}..."`,
             `docker run -d --name ${containerName} --restart always ${portArgs} --network ${primaryNetwork} ${bindArgs} ${envArgs} ${candidateImageTag}`,
             networkConnectCmds,
+            'echo "[Swapper] Membersihkan image build usang (dangling image cache)..."',
+            'docker image prune -f || true',
             `echo "[Swapper] Hotswap selesai! Kontainer ${containerName} resmi aktif."`
         ].filter(Boolean).join(' && ');
 
