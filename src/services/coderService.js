@@ -38,8 +38,23 @@ export class CoderService {
         logger.info({ targetDir, taskDescription, containerName }, 'Memulai Autonomous Coder...');
         await emitLog('thinking', `Coder Engine menganalisis tugas: "${taskDescription}"`);
 
-        // Coba jalankan via Aider jika Docker daemon aktif dan Aider diaktifkan
-        const useAider = process.env.ENABLE_AIDER !== 'false';
+        const isSelfKernel = containerName === (process.env.CONTAINER_NAME || 'secondbrain');
+
+        // Untuk kernel Waguri (secondbrain), gunakan Gemini Synthesizer sebagai mesin koding utama
+        // karena memahami konvensi tools Waguri secara langsung dan terbukti 100% cepat & presisi
+        if (isSelfKernel) {
+            try {
+                await emitLog('working', 'Menggunakan Gemini Synthesizer untuk merakit modul Waguri secara presisi...');
+                const synthResult = await this.runDirectGeminiSynthesizer({ targetDir, taskDescription, emitLog });
+                await emitLog('done', `Gemini Synthesizer berhasil menerapkan perubahan kode: "${taskDescription}"`);
+                return { success: true, method: 'gemini_fallback', message: synthResult.message };
+            } catch (synthErr) {
+                logger.warn({ err: synthErr.message }, 'Gemini Synthesizer mengalami kendala, mencoba Aider sebagai alternatif...');
+            }
+        }
+
+        // Coba jalankan via Aider jika kontainer target adalah proyek eksternal atau sebagai fallback
+        const useAider = process.env.ENABLE_AIDER === 'true';
         if (useAider) {
             try {
                 const aiderResult = await this.runAiderContainer({ targetDir, taskDescription, emitLog });
@@ -251,30 +266,35 @@ export class CoderService {
         }
 
         const prompt = `Kamu adalah Autonomous Senior Software Engineer di sistem Waguri Second Brain.
-Tugasmu adalah memenuhi instruksi teknis berikut dengan memodifikasi atau membuat file baru:
+Tugasmu adalah memenuhi instruksi teknis berikut dengan membuat atau memodifikasi file kode sumber:
 "${taskDescription}"
 
-Struktur file yang ada saat ini di proyek:
-${fileStructure || 'Tidak ada struktur file yang terdeteksi'}
+Struktur direktori 'src/' proyek Waguri:
+${fileStructure || 'Belum ada struktur file'}
 
-Referensi src/tools/index.js saat ini:
-\`\`\`javascript
-${toolsIndexContent.slice(0, 2000)}
-\`\`\`
+Aturan Konvensi Arsitektur Waguri:
+1. Tool baru WAJIB disimpan di dalam salah satu subfolder kategori:
+   - 'src/tools/eksternal/' untuk integrasi API publik/eksternal (misal: cuaca, kucing, anime, web).
+   - 'src/tools/vps/' untuk manajemen server & docker.
+   - 'src/tools/android/' untuk IoT atau kontrol perangkat.
+   - 'src/tools/memori/' untuk ingatan RAG / Milvus.
+   - 'src/tools/jadwal/' untuk manajemen agenda / cron.
+   - 'src/tools/keuangan/' untuk aset & portofolio.
+2. JANGAN PERNAH membuat atau memodifikasi 'src/tools/index.js'! File 'src/tools/index.js' secara otomatis memindai dan memuat semua file tool di dalam subfolder-subfolder di atas saat server boot.
+3. Setiap file tool baru WAJIB bertipe ES Modules dan meng-export dua objek:
+   - 'export const declaration = { name: "...", description: "...", parameters: { type: "object", properties: { ... } } };'
+   - 'export async function execute(args) { ... }' (mengembalikan objek hasil seperti { status: "success", data: ... }).
+4. Tulis kode yang lengkap, aman, menggunakan fetch / axios / built-in library, tanpa placeholder atau elipsis (...).
 
 Instruksi format respon:
 Kembalikan respon HANYA dalam format JSON valid (tanpa markdown tambahan di luar JSON) berupa array perubahan file:
 [
   {
-    "filePath": "src/tools/eksternal/contoh.js",
-    "action": "create", // atau "update"
-    "content": "isi kode lengkap file di sini..."
+    "filePath": "src/tools/eksternal/nama_tool.js",
+    "action": "create",
+    "content": "isi kode JavaScript lengkap di sini..."
   }
-]
-Perhatikan:
-1. Kode HARUS valid ES Modules (menggunakan 'import' dan 'export', bukan 'require').
-2. Jika menambahkan tool baru di 'src/tools/...', pastikan juga mengupdate 'src/tools/index.js' agar tool tersebut di-export di 'toolDeclarations' dan 'toolHandlers'.
-3. Sertakan kode secara LENGKAP tanpa elipsis (...) atau placeholder.`;
+]`;
 
         const response = await this.ai.models.generateContent({
             model: process.env.GEMINI_MODEL || 'gemini-flash-latest',

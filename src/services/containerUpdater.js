@@ -497,8 +497,10 @@ export class ContainerUpdaterService {
     }) {
         logger.info({ containerName, candidateImageTag }, '🚀 Menjalankan Swapper Daemon untuk self-swap zero-downtime...');
 
-        const primaryNetwork = allNetworks[0] || 'waguri-internal';
-        const additionalNetworks = allNetworks.slice(1);
+        // Prioritaskan network internal proyek sebagai primary network agar saat boot langsung terhubung ke Redis & Mongo
+        const internalNet = allNetworks.find(n => n.includes('internal') || n.includes('second-brain'));
+        const primaryNetwork = internalNet || allNetworks[0] || 'second-brain_waguri-internal';
+        const additionalNetworks = allNetworks.filter(n => n !== primaryNetwork);
 
         const bindArgs = (targetBinds || []).map(b => `-v "${b}"`).join(' ');
         
@@ -554,12 +556,22 @@ export class ContainerUpdaterService {
             await swapper.start();
             logger.info('✅ Swapper Daemon berhasil diluncurkan di background.');
 
-            // Jadwalkan pembersihan kontainer swapper setelah 20 detik
+            // Alirkan log swapper secara real-time ke console logger
+            swapper.logs({ follow: true, stdout: true, stderr: true }).then(stream => {
+                stream.on('data', chunk => {
+                    const lines = chunk.toString('utf8').trim().split('\n');
+                    for (const l of lines) {
+                        if (l) logger.info({ swapper: 'daemon' }, l);
+                    }
+                });
+            }).catch(() => {});
+
+            // Jadwalkan pembersihan kontainer swapper setelah 25 detik
             setTimeout(async () => {
                 try {
                     await swapper.remove({ force: true }).catch(() => {});
                 } catch (_) {}
-            }, 20000);
+            }, 25000);
         } catch (swapperErr) {
             logger.error({ err: swapperErr.message }, 'Gagal meluncurkan Swapper Daemon.');
             throw swapperErr;

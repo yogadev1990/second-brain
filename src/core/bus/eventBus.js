@@ -32,14 +32,38 @@ export class RedisEventBus {
 
     async init() {
         if (this.isConnected) return;
-        try {
-            await this.pubClient.connect();
-            await this.subClient.connect();
-            this.isConnected = true;
-            logger.info('✅ Hub Redis EventBus berhasil terhubung ke server.');
-        } catch (error) {
-            logger.warn({ err: error.message }, 'Redis belum siap atau tidak aktif di localhost. Mode fallback aktif.');
+        const candidateHosts = [
+            process.env.REDIS_HOST,
+            'waguri-redis',
+            'redis',
+            '127.0.0.1',
+            'localhost'
+        ].filter(Boolean);
+
+        for (const host of [...new Set(candidateHosts)]) {
+            try {
+                const port = Number(process.env.REDIS_PORT) || 6379;
+                const url = `redis://${host}:${port}`;
+                const pub = createClient({ url });
+                const sub = createClient({ url });
+                pub.on('error', () => {});
+                sub.on('error', () => {});
+
+                await pub.connect();
+                await sub.connect();
+
+                this.pubClient = pub;
+                this.subClient = sub;
+                this.pubClient.on('error', (err) => logger.error({ err }, 'Redis Pub Error'));
+                this.subClient.on('error', (err) => logger.error({ err }, 'Redis Sub Error'));
+                this.isConnected = true;
+                logger.info({ host, port }, '✅ Hub Redis EventBus berhasil terhubung ke server.');
+                return;
+            } catch (err) {
+                // Coba kandidat host berikutnya
+            }
         }
+        logger.warn('Redis belum siap atau tidak aktif di semua target host. Mode fallback aktif.');
     }
 
     /**
