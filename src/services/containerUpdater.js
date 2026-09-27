@@ -497,10 +497,11 @@ export class ContainerUpdaterService {
     }) {
         logger.info({ containerName, candidateImageTag }, '🚀 Menjalankan Swapper Daemon untuk self-swap zero-downtime...');
 
-        // Prioritaskan network internal proyek sebagai primary network agar saat boot langsung terhubung ke Redis & Mongo
-        const internalNet = allNetworks.find(n => n.includes('internal') || n.includes('second-brain'));
-        const primaryNetwork = internalNet || allNetworks[0] || 'second-brain_waguri-internal';
-        const additionalNetworks = allNetworks.filter(n => n !== primaryNetwork);
+        // Filter out system networks yang tidak boleh di-connect ulang manual
+        const filteredNetworks = (allNetworks || []).filter(n => n && n !== 'bridge' && n !== 'host' && n !== 'none');
+        const internalNet = filteredNetworks.find(n => n.includes('internal') || n.includes('second-brain'));
+        const primaryNetwork = internalNet || filteredNetworks[0] || 'second-brain_waguri-internal';
+        const additionalNetworks = filteredNetworks.filter(n => n !== primaryNetwork);
 
         const bindArgs = (targetBinds || []).map(b => `-v "${b}"`).join(' ');
         
@@ -524,9 +525,12 @@ export class ContainerUpdaterService {
             }).join(' ');
         }
 
-        const networkConnectCmds = additionalNetworks.map(net => `docker network connect ${net} ${containerName} || true;`).join(' ');
+        const networkConnectCmds = additionalNetworks
+            .map(net => `docker network connect ${net} ${containerName} || true`)
+            .join('\n');
 
         const swapScript = [
+            'set -e',
             'sleep 1',
             `echo "[Swapper] Menghentikan kontainer uji kandidat ${candidateContainerName}..."`,
             `docker rm -f ${candidateContainerName} || true`,
@@ -539,7 +543,7 @@ export class ContainerUpdaterService {
             'echo "[Swapper] Membersihkan image build usang (dangling image cache)..."',
             'docker image prune -f || true',
             `echo "[Swapper] Hotswap selesai! Kontainer ${containerName} resmi aktif."`
-        ].filter(Boolean).join(' && ');
+        ].filter(Boolean).join('\n');
 
         try {
             const swapper = await this.docker.createContainer({
@@ -549,7 +553,7 @@ export class ContainerUpdaterService {
                 HostConfig: {
                     Binds: ['/var/run/docker.sock:/var/run/docker.sock'],
                     NetworkMode: primaryNetwork,
-                    AutoRemove: false // Tetap ada sesaat agar log swapper dapat diperiksa jika ada kendala
+                    AutoRemove: false // Tetap ada sesaat agar log swapper dapat diperiksa
                 }
             });
 
@@ -566,12 +570,19 @@ export class ContainerUpdaterService {
                 });
             }).catch(() => {});
 
-            // Jadwalkan pembersihan kontainer swapper setelah 25 detik
-            setTimeout(async () => {
-                try {
+            // Musnahkan kontainer swapper secara bersih setelah selesai bekerja
+            if (typeof swapper.wait === 'function') {
+                swapper.wait().then(async () => {
+                    await new Promise(r => setTimeout(r, 5000));
                     await swapper.remove({ force: true }).catch(() => {});
-                } catch (_) {}
-            }, 25000);
+                }).catch(() => {});
+            } else {
+                setTimeout(async () => {
+                    try {
+                        await swapper.remove({ force: true }).catch(() => {});
+                    } catch (_) {}
+                }, 25000);
+            }
         } catch (swapperErr) {
             logger.error({ err: swapperErr.message }, 'Gagal meluncurkan Swapper Daemon.');
             throw swapperErr;
