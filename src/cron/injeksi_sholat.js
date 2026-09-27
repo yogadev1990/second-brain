@@ -29,22 +29,30 @@ export const injeksiWaktuSholat = async () => {
         const sholatWajib = ['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'];
         const tanggalHariIni = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' }); // Format: YYYY-MM-DD, dipaksa WIB
 
+        const now = new Date();
         for (const waktu of sholatWajib) {
             const namaLokal = NAMA_SHOLAT_MAP[waktu];
             // Konversi waktu string (misal "12:15") ke objek Date absolut WIB
             const waktuIso = new Date(`${tanggalHariIni}T${timings[waktu]}:00+07:00`);
             const idTugas = `sholat_${waktu.toLowerCase()}_${tanggalHariIni}`;
 
+            // Jika waktu sholat ini sudah berlalu lebih dari 15 menit yang lalu saat boot, tandai selesai agar tidak membom notifikasi
+            const sudahLewat = waktuIso.getTime() < (now.getTime() - 15 * 60000);
+
             await Jadwal.findOneAndUpdate(
                 { id_tugas: idTugas },
                 { 
-                    id_tugas: idTugas,
-                    nama_kegiatan: `Sholat ${namaLokal}`, 
-                    tipe_jadwal: 'absolut', 
-                    waktu_eksekusi_statis: waktuIso,
-                    butuh_fisik: false,
-                    status_selesai: false,
-                    notifikasi_terkirim: false
+                    $set: {
+                        nama_kegiatan: `Sholat ${namaLokal}`, 
+                        tipe_jadwal: 'absolut', 
+                        waktu_eksekusi_statis: waktuIso,
+                        butuh_fisik: false
+                    },
+                    $setOnInsert: {
+                        id_tugas: idTugas,
+                        status_selesai: sudahLewat,
+                        notifikasi_terkirim: sudahLewat
+                    }
                 },
                 { upsert: true, returnDocument: 'after' }
             );

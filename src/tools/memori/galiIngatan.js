@@ -1,11 +1,8 @@
-import { MilvusClient } from '@zilliz/milvus2-sdk-node';
-import { GoogleGenAI } from '@google/genai';
-
-let milvusAddress = null;
+import { mongoMemoryService } from '../../services/mongoMemoryService.js';
 
 export const declaration = {
     name: "gali_ingatan",
-    description: "Mencari ingatan masa lalu, fakta, atau jurnal dari memori jangka panjang.",
+    description: "Mencari ingatan masa lalu, fakta, preferensi, atau riwayat catatan dari memori jangka panjang MongoDB menggunakan pencarian semantik vektor.",
     parameters: {
         type: "object",
         properties: {
@@ -15,7 +12,7 @@ export const declaration = {
             },
             filter_kategori: {
                 type: "string",
-                description: "Filter opsional berdasarkan kategori (Jurnal, Proyek, Log_Aktivitas, Ide, Fakta_Pribadi). Biarkan kosong jika ingin mencari semua.",
+                description: "Filter opsional berdasarkan kategori (Jurnal, Proyek, Log_Aktivitas, Ide, Fakta_Pribadi, Umum). Biarkan kosong jika ingin mencari semua.",
                 nullable: true,
             },
         },
@@ -24,13 +21,6 @@ export const declaration = {
 };
 
 export async function execute(args) {
-    // Inisialisasi SDK Baru
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    
-    if (!milvusAddress) {
-        milvusAddress = process.env.MILVUS_ADDRESS || `${process.env.MILVUS_HOST}:${process.env.MILVUS_PORT}`;
-    }
-
     const { kata_kunci, filter_kategori } = args;
 
     if (!kata_kunci) {
@@ -38,55 +28,28 @@ export async function execute(args) {
     }
 
     try {
-        // Tahap 1: Embedding kata_kunci dengan Task Type Khusus Query
-        const embedResponse = await ai.models.embedContent({
-            model: 'gemini-embedding-001',
-            contents: kata_kunci,
-            config: { 
-                outputDimensionality: 768,
-                taskType: 'RETRIEVAL_QUERY' // Mutlak wajib agar cocok dengan RETRIEVAL_DOCUMENT di fungsi tanam
-            },
-        });
+        const category = filter_kategori && filter_kategori.trim() !== "" ? filter_kategori.trim() : undefined;
         
-        const searchVector = embedResponse.embeddings[0].values;
+        // Pencarian Vektor Semantik langsung di MongoDB
+        const results = await mongoMemoryService.searchVector(kata_kunci, { category, limit: 5 });
 
-        // Tahap 2: Lakukan vector search ke Milvus
-        const milvusClient = new MilvusClient({ address: milvusAddress });
-        
-        let expr = undefined;
-        if (filter_kategori && filter_kategori.trim() !== "") {
-            expr = `kategori == '${filter_kategori}'`;
+        if (!results || results.length === 0) {
+            return { hasil: "Tidak ada ingatan yang relevan ditemukan di database." };
         }
 
-        const searchRes = await milvusClient.search({
-            collection_name: "Memori_Waguri",
-            vector: searchVector,
-            filter: expr,
-            output_fields: ["teks_asli", "kategori", "tags"],
-            limit: 5,
+        let combinedText = "Hasil pencarian ingatan (MongoDB Vector Search):\n";
+        results.forEach((item, index) => {
+            const tagString = item.tags && item.tags.length > 0 ? ` [Tags: ${item.tags.join(', ')}]` : '';
+            combinedText += `${index + 1}. [Kategori: ${item.category}]${tagString} (Skor Kemiripan: ${(item.score * 100).toFixed(1)}%)\nIsi: ${item.content}\n\n`;
         });
 
-        await milvusClient.closeConnection();
-
-        if (!searchRes.results || searchRes.results.length === 0) {
-            return { hasil: "Tidak ada ingatan yang relevan ditemukan." }; // BENAR
-        }
-
-        // Tahap 3: Rangkai teks_asli dari hasil pencarian agar mudah dibaca AI
-        let combinedText = "Hasil pencarian ingatan:\n";
-        searchRes.results.forEach((item, index) => {
-            const tagString = item.tags ? `[Tags: ${JSON.stringify(item.tags)}]` : '';
-            combinedText += `${index + 1}. [Kategori: ${item.kategori}] ${tagString}\nIsi: ${item.teks_asli}\n\n`;
-        });
-
-return { hasil: combinedText }; // BENAR
+        return { hasil: combinedText };
 
     } catch (error) {
         console.error("[gali_ingatan] Error:", error);
         return {
             status: "error",
-            message: "Gagal menggali ingatan.",
-            error: error.message
+            message: `Gagal menggali ingatan: ${error.message}`
         };
     }
 }

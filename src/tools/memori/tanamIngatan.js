@@ -1,7 +1,5 @@
-import { MilvusClient } from '@zilliz/milvus2-sdk-node';
 import { GoogleGenAI } from '@google/genai';
-
-let milvusAddress = null;
+import { mongoMemoryService } from '../../services/mongoMemoryService.js';
 
 export const declaration = {
     name: "tanam_ingatan",
@@ -19,13 +17,7 @@ export const declaration = {
 };
 
 export async function execute(args) {
-    // Inisialisasi SDK Baru
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    
-    if (!milvusAddress) {
-        milvusAddress = process.env.MILVUS_ADDRESS || `${process.env.MILVUS_HOST}:${process.env.MILVUS_PORT}`;
-    }
-
     const { teks_mentah } = args;
 
     if (!teks_mentah) {
@@ -33,8 +25,8 @@ export async function execute(args) {
     }
 
     try {
-        // Tahap 1: Auto-Tagging Hemat Token menggunakan SDK Baru
-        const promptTagging = `Ekstrak teks berikut ke dalam JSON murni yang berisi 'kategori' (pilih satu: Jurnal, Proyek, Log_Aktivitas, Ide, Fakta_Pribadi) dan 'tags' (array 3 kata kunci). Jangan berikan teks lain. Teks: ${teks_mentah}`;
+        // Tahap 1: Auto-Tagging Kategori & Tags via Gemini Flash
+        const promptTagging = `Ekstrak teks berikut ke dalam JSON murni yang berisi 'kategori' (pilih satu: Jurnal, Proyek, Log_Aktivitas, Ide, Fakta_Pribadi, Umum) dan 'tags' (array 3 kata kunci). Jangan berikan teks lain. Teks: ${teks_mentah}`;
         
         const taggingResult = await ai.models.generateContent({
             model: 'gemini-flash-latest',
@@ -44,53 +36,35 @@ export async function execute(args) {
             }
         });
         
-        const taggingJson = JSON.parse(taggingResult.text);
-        const kategori = taggingJson.kategori || "Ide";
-        const tags = taggingJson.tags || [];
+        let kategori = "Umum";
+        let tags = [];
+        try {
+            const taggingJson = JSON.parse(taggingResult.text);
+            kategori = taggingJson.kategori || "Umum";
+            tags = taggingJson.tags || [];
+        } catch (_) {}
 
-        // Tahap 2: Embedding Spesifik dengan Task Type & Dimensi
-        const embedResponse = await ai.models.embedContent({
-            model: 'gemini-embedding-001',
-            contents: teks_mentah,
-            config: { 
-                outputDimensionality: 768,
-                taskType: 'RETRIEVAL_DOCUMENT' // Wajib untuk data yang masuk ke database
-            },
+        // Tahap 2: Tanam ke MongoDB Vector Database via mongoMemoryService
+        const doc = await mongoMemoryService.tanamIngatan({
+            content: teks_mentah,
+            category: kategori,
+            tags: tags,
+            metadata: { source: 'user_chat' }
         });
-        
-        const vektor = embedResponse.embeddings[0].values;
-
-        // Tahap 3: Insert ke Milvus
-        const milvusClient = new MilvusClient({ address: milvusAddress });
-        
-        const insertRes = await milvusClient.insert({
-            collection_name: "Memori_Waguri",
-            data: [
-                {
-                    vektor: vektor,
-                    teks_asli: teks_mentah,
-                    kategori: kategori,
-                    tags: tags 
-                }
-            ],
-        });
-
-        await milvusClient.closeConnection();
 
         return {
             status: "success",
-            message: "Ingatan berhasil ditanam.",
+            message: "Ingatan berhasil ditanam ke MongoDB Vector Database.",
+            docId: doc.docId,
             kategori: kategori,
-            tags: tags,
-            insert_result: insertRes
+            tags: tags
         };
 
     } catch (error) {
         console.error("[tanam_ingatan] Error:", error);
         return {
             status: "error",
-            message: "Gagal menanam ingatan.",
-            error: error.message
+            message: `Gagal menanam ingatan: ${error.message}`
         };
     }
 }

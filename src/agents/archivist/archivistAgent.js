@@ -1,10 +1,10 @@
 import { eventBus } from '../../core/bus/eventBus.js';
 import { TOPICS } from '../../core/bus/topics.js';
 import { createAgentLogger } from '../../core/logger/index.js';
-import { executeHybridRRFSearch, MemoryDocument } from './hybridSearch.js';
+import { executeHybridRRFSearch } from './hybridSearch.js';
+import { mongoMemoryService } from '../../services/mongoMemoryService.js';
 import ChatSession from '../../models/ChatSession.js';
 import { GoogleGenAI } from '@google/genai';
-import { v4 as uuidv4 } from 'uuid';
 
 const logger = createAgentLogger('TheArchivist');
 
@@ -14,7 +14,7 @@ export class ArchivistAgent {
     }
 
     async init() {
-        logger.info('Menginisialisasi Subagen The Archivist (Memory Engine)...');
+        logger.info('Menginisialisasi Subagen The Archivist (Memory Engine via MongoDB Vector)...');
 
         // Handler untuk RPC Hybrid Search dari Master Agent
         await eventBus.subscribe(TOPICS.MEMORY.SEARCH_HYBRID, async (event) => {
@@ -38,26 +38,24 @@ export class ArchivistAgent {
             }
         });
 
-        // Handler untuk Ingest Memory Teks Baru
+        // Handler untuk Ingest Memory Teks Baru ke MongoDB Vector Database
         await eventBus.subscribe(TOPICS.MEMORY.INGEST_FACT, async (event) => {
             const { content, category, tags } = event.payload || {};
             if (!content) return;
 
             try {
-                const docId = uuidv4();
-                await MemoryDocument.create({
-                    docId,
+                const doc = await mongoMemoryService.tanamIngatan({
                     content,
                     category: category || 'General',
                     tags: tags || []
                 });
-                logger.info({ docId, category }, 'Fakta baru berhasil disimpan ke katalog MongoDB Text Index.');
+                logger.info({ docId: doc.docId, category }, 'Fakta baru berhasil disimpan ke MongoDB Vector & Text Index.');
             } catch (err) {
-                logger.error({ err: err.message }, 'Gagal menyimpan ingatan ke database teks');
+                logger.error({ err: err.message }, 'Gagal menyimpan ingatan ke database vektor');
             }
         });
 
-        logger.info('✅ The Archivist aktif dan siap mengelola ingatan.');
+        logger.info('✅ The Archivist aktif dan siap mengelola ingatan (MongoDB RAG Mode).');
     }
 
     /**
@@ -85,11 +83,10 @@ export class ArchivistAgent {
 
                 const extracted = JSON.parse(response.text || '[]');
                 for (const fact of extracted) {
-                    await MemoryDocument.create({
-                        docId: uuidv4(),
+                    await mongoMemoryService.tanamIngatan({
                         content: fact,
                         category: 'AutoExtracted_Daily',
-                        tags: ['chat_log', session.deviceId]
+                        tags: ['chat_log', session.deviceId || 'default']
                     });
                     logger.info({ fact }, 'Berhasil mengekstrak memori baru dari riwayat percakapan.');
                 }

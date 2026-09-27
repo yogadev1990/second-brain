@@ -9,21 +9,32 @@ export const initWatchdogStatis = (io) => {
         
         try {
             const waktuSekarang = new Date();
-            const waktuBatas = new Date(waktuSekarang.getTime() + 15 * 60000); // 15 menit dari sekarang
+            const waktuBatas = new Date(waktuSekarang.getTime() + 15 * 60000); // 15 menit ke depan
+            const waktuMinimal = new Date(waktuSekarang.getTime() - 15 * 60000); // Batas toleransi 15 menit ke belakang
 
-            // PERBAIKAN LOGIKA: Ambil semua jadwal yang waktunya KURANG DARI 15 menit ke depan, 
-            // termasuk yang sudah kelewat (karena mungkin server mati sesaat), asalkan belum dinotifikasi!
+            // 1. SILENT AUTO-EXPIRE: Tandai selesai jadwal-jadwal lampau yang sudah lewat lebih dari 15 menit
+            // agar tidak terjadi pemboman notifikasi saat kontainer baru selesai restart.
+            await Jadwal.updateMany({
+                tipe_jadwal: { $in: ['statis', 'absolut'] },
+                status_selesai: false,
+                notifikasi_terkirim: false,
+                waktu_eksekusi_statis: { $lt: waktuMinimal }
+            }, {
+                $set: { notifikasi_terkirim: true, status_selesai: true }
+            });
+
+            // 2. Ambil hanya jadwal yang benar-benar relevan saat ini (rentang waktu: -15 menit s/d +15 menit)
             const jadwalMendatang = await Jadwal.find({
                 tipe_jadwal: { $in: ['statis', 'absolut'] },
                 status_selesai: false,
                 notifikasi_terkirim: false,
-                waktu_eksekusi_statis: { $lte: waktuBatas },
+                waktu_eksekusi_statis: { $gte: waktuMinimal, $lte: waktuBatas },
                 $or: [{ butuh_fisik: false }, { butuh_fisik: { $exists: false } }]
             });
 
-            console.log(`[Watchdog Kueri] Menemukan ${jadwalMendatang.length} jadwal yang perlu dinotifikasi.`);
-
             if (jadwalMendatang.length === 0) return; // Keluar jika kosong
+
+            console.log(`[Watchdog Kueri] Menemukan ${jadwalMendatang.length} jadwal aktif yang perlu dinotifikasi.`);
 
             for (const jadwal of jadwalMendatang) {
                 console.log(`[Watchdog Eksekusi] Memproses jadwal: ${jadwal.nama_kegiatan} | Waktu Eksekusi: ${jadwal.waktu_eksekusi_statis}`);
@@ -31,20 +42,26 @@ export const initWatchdogStatis = (io) => {
                 // Kunci datanya agar tidak ke-spam di menit berikutnya
                 await Jadwal.updateOne({ _id: jadwal._id }, { $set: { notifikasi_terkirim: true } });
 
-                // Hasilkan pesan plain-text bergaya Kaoruko Waguri tanpa buang token
-                const textResponse = `Sayang, jadwal "${jadwal.nama_kegiatan}" sebentar lagi mau mulai nih. Jangan lupa siap-siap ya suamiku! 💕`;
+                // Format teks pengingat Waguri yang santun, lembut, dan bersahaja (anti-alay)
+                let textResponse;
+                if (jadwal.nama_kegiatan.toLowerCase().includes('sholat')) {
+                    textResponse = `Mas Yoga, sebentar lagi masuk waktu ${jadwal.nama_kegiatan}. Kalau senggang, yuk bersiap-siap sholat dulu ya...`;
+                } else {
+                    textResponse = `Mas Yoga, jadwal "${jadwal.nama_kegiatan}" sebentar lagi mau dimulai ya. Jangan lupa bersiap-siap...`;
+                }
 
                 const payload = {
                     status: "success",
                     response: textResponse,
-                    isProactive: true
+                    isProactive: true,
+                    type: "SCHEDULE_REMINDER"
                 };
 
                 console.log(`[Watchdog Emit] Menembakkan Socket.io ke UI...`);
                 io.emit('chat_reply', payload);
                 
                 // Suntikkan ke memori AI
-                await injectProactiveMessage(textResponse, `Waktunya mengingatkan Randa tentang jadwal "${jadwal.nama_kegiatan}".`);
+                await injectProactiveMessage(textResponse, `Waktunya mengingatkan Mas Yoga tentang jadwal "${jadwal.nama_kegiatan}".`);
             }
         } catch (error) {
             console.error('[Watchdog ERROR FATAL] Terjadi kesalahan:', error);
