@@ -69,7 +69,7 @@ export class CoderService {
      */
     async runAiderContainer({ targetDir, taskDescription, emitLog }) {
         const aiderImage = process.env.AIDER_IMAGE || 'paulgauthier/aider:latest';
-        const aiderModel = process.env.AIDER_MODEL || 'gemini/gemini-2.5-flash';
+        const aiderModel = process.env.AIDER_MODEL || 'gemini/gemini-flash-latest';
         const ephemeralName = `aider-coder-${Date.now()}`;
 
         // Periksa apakah Docker daemon merespons
@@ -227,7 +227,7 @@ Perhatikan:
 3. Sertakan kode secara LENGKAP tanpa elipsis (...) atau placeholder.`;
 
         const response = await this.ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: process.env.GEMINI_MODEL || 'gemini-flash-latest',
             contents: prompt,
             config: {
                 temperature: 0.1,
