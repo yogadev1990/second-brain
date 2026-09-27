@@ -6,6 +6,7 @@ import util from 'util';
 import { eventBus } from '../core/bus/eventBus.js';
 import { TOPICS } from '../core/bus/topics.js';
 import { createAgentLogger } from '../core/logger/index.js';
+import { coderService } from './coderService.js';
 
 const logger = createAgentLogger('ContainerUpdater');
 const execAsync = util.promisify(exec);
@@ -24,6 +25,7 @@ export class ContainerUpdaterService {
     constructor() {
         this.docker = new Docker({ socketPath: process.env.DOCKER_SOCKET_PATH || '/var/run/docker.sock' });
         this.activeUpdates = new Set();
+        this.coderService = coderService;
     }
 
     /**
@@ -124,6 +126,13 @@ export class ContainerUpdaterService {
             const targetNetwork = Object.keys(currentInspect?.NetworkSettings?.Networks || {})[0] || 'waguri-internal';
 
             // -------------------------------------------------------------
+            // TAHAP 1.5: EKSEKUSI AUTONOMOUS CODER (Aider / Gemini)
+            // -------------------------------------------------------------
+            if (taskDescription) {
+                await this.executeCoder(targetHostDir, taskDescription, containerName);
+            }
+
+            // -------------------------------------------------------------
             // TAHAP 2: PROSES BUILD IMAGE KANDIDAT
             // -------------------------------------------------------------
             let buildSuccess = false;
@@ -142,6 +151,7 @@ export class ContainerUpdaterService {
                     if (failurePolicy === FAILURE_POLICIES.AUTO_REPAIR_THEN_ROLLBACK && repairAttempts <= maxRepairAttempts) {
                         logger.warn({ repairAttempts, err: buildError }, '⚠️ Build gagal, memicu Ephemeral Auto-Repair patch...');
                         await this.emitChatroomLog('working', `Build gagal. Memicu Auto-Repair patch (${repairAttempts}/${maxRepairAttempts})...`);
+                        await this.executeCoder(targetHostDir, `Perbaiki kegagalan build image Docker berikut: ${buildError}`, containerName);
                         await new Promise(r => setTimeout(r, 500));
                     } else {
                         break;
@@ -195,6 +205,9 @@ export class ContainerUpdaterService {
                 await candidateContainer.stop({ t: 2 }).catch(() => {});
                 await candidateContainer.remove({ force: true, v: true }).catch(() => {});
                 candidateContainer = null;
+
+                // Terapkan auto-repair koding untuk mengatasi crash runtime
+                await this.executeCoder(targetHostDir, `Kontainer mengalami crash atau gagal healthcheck: ${candidateLog || 'Unhealthy'}. Perbaiki kode agar kontainer berjalan sehat.`, containerName);
 
                 // Uji ulang setelah patching
                 repairAttempts++;
@@ -396,6 +409,24 @@ export class ContainerUpdaterService {
             await new Promise(r => setTimeout(r, 1000));
         }
         return false;
+    }
+
+    /**
+     * Memanggil CoderService untuk memproses kode secara mandiri
+     */
+    async executeCoder(targetDir, taskDescription, containerName) {
+        if (!taskDescription || !this.coderService) return;
+        try {
+            await this.coderService.runAutonomousCoder({
+                targetDir,
+                taskDescription,
+                containerName,
+                emitLog: (status, msg) => this.emitChatroomLog(status, msg)
+            });
+        } catch (coderErr) {
+            logger.error({ err: coderErr.message }, 'Tahap Autonomous Coder mengalami kendala.');
+            await this.emitChatroomLog('reporting', `⚠️ Coder notice: ${coderErr.message}`);
+        }
     }
 
     async buildImage(candidateImageTag, targetHostDir) {

@@ -253,6 +253,7 @@ async function runTests() {
 
         let capturedBuildContext = null;
         updater.docker = mockDocker;
+        updater.coderService = { runAutonomousCoder: async () => ({ success: true }) };
         updater.buildImage = async (tag, contextDir) => {
             capturedBuildContext = contextDir;
         };
@@ -277,6 +278,43 @@ async function runTests() {
         passedTests++;
     } catch (err) {
         console.error('❌ FAIL Test 5:', err);
+    }
+
+    // -------------------------------------------------------------
+    // TEST 6: CoderService Autonomous Code Modification Contract
+    // -------------------------------------------------------------
+    totalTests++;
+    console.log('\n▶️  [Test 6] Pengujian Autonomous Coder Execution Contract');
+    try {
+        const updater = new ContainerUpdaterService();
+        let coderCalledWith = null;
+        updater.coderService = {
+            runAutonomousCoder: async (params) => {
+                coderCalledWith = params;
+                return { success: true, method: 'aider', message: 'Patched successfully' };
+            }
+        };
+        updater.docker = new MockDocker();
+        updater.buildImage = async () => {};
+        updater.emitChatroomLog = async () => {};
+        updater.createGitCheckpoint = async () => true;
+        updater.clearGitCheckpoint = async () => {};
+        updater.revertGitCheckpoint = async () => true;
+        updater.probeContainerHealth = async () => true;
+
+        await updater.updateContainer({
+            containerName: 'revandastore-app',
+            taskDescription: 'Tambahkan endpoint baru',
+            failurePolicy: FAILURE_POLICIES.ROLLBACK_ONLY,
+            healthcheckTimeoutMs: 1000
+        });
+
+        assert(coderCalledWith !== null, 'CoderService harus dipanggil dengan parameter yang benar!');
+        assert.strictEqual(coderCalledWith.taskDescription, 'Tambahkan endpoint baru');
+        console.log('✅ PASS: CoderService berhasil dipicu dengan parameter tugas yang tepat sebelum proses build image.');
+        passedTests++;
+    } catch (err) {
+        console.error('❌ FAIL Test 6:', err);
     }
 
     console.log('\n====================================================');
