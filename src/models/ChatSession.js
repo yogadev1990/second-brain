@@ -10,6 +10,6 @@ const chatSessionSchema = new mongoose.Schema({
         type: Array, 
         default: [] 
     }
-}, { timestamps: true });
+}, { timestamps: true, versionKey: false });
 
 export default mongoose.model('ChatSession', chatSessionSchema);

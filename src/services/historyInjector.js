@@ -18,8 +18,7 @@ export async function injectProactiveMessage(text, contextReason) {
                     newHistory.shift();
                 }
             }
-            session.history = newHistory;
-            await session.save();
+            await ChatSession.updateOne({ _id: session._id }, { $set: { history: newHistory } });
         }
         console.log(`[History Injector] Berhasil menyuntikkan memori proaktif ke database!`);
     } catch (error) {

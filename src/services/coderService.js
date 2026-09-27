@@ -80,11 +80,15 @@ export class CoderService {
         // Pastikan image Aider tersedia (jika belum, beri log)
         await emitLog('working', `Menyiapkan image AI Coder (${aiderImage})...`);
         
+        // Ambil snapshot status file direktori sebelum Aider berjalan
+        const snapshotBefore = this.getDirSnapshot(targetDir);
+
         let container = null;
         try {
             container = await this.docker.createContainer({
                 Image: aiderImage,
                 name: ephemeralName,
+                User: '0:0', // Pastikan berjalan sebagai root agar tidak terkena permission denied
                 WorkingDir: '/app',
                 Env: [
                     `GEMINI_API_KEY=${process.env.GEMINI_API_KEY || ''}`,
@@ -140,6 +144,12 @@ export class CoderService {
                 throw new Error(`Aider selesai dengan Exit Code ${exitCode}. Cuplikan log: ${logBuffer.slice(-300)}`);
             }
 
+            // Verifikasi apakah Aider benar-benar memodifikasi/menambahkan file kode program
+            const filesChanged = this.checkFilesChanged(targetDir, snapshotBefore);
+            if (!filesChanged) {
+                throw new Error('Aider tidak menghasilkan perubahan file kode sumber (hanya obrolan teks). Memerlukan Direct Gemini Synthesizer.');
+            }
+
             return {
                 success: true,
                 message: `Aider berhasil memodifikasi kode. Log ringkas: ${logBuffer.slice(-200)}`
@@ -153,6 +163,47 @@ export class CoderService {
                 } catch (_) {}
             }
         }
+    }
+
+    /**
+     * Mengambil snapshot timestamp modifikasi seluruh file dalam direktori
+     */
+    getDirSnapshot(dir) {
+        const snapshot = new Map();
+        const walk = (current) => {
+            if (!fs.existsSync(current)) return;
+            try {
+                const items = fs.readdirSync(current, { withFileTypes: true });
+                for (const item of items) {
+                    if (item.name === 'node_modules' || item.name.startsWith('.git') || item.name.startsWith('.aider')) continue;
+                    const full = path.join(current, item.name);
+                    if (item.isDirectory()) {
+                        walk(full);
+                    } else {
+                        try {
+                            const stat = fs.statSync(full);
+                            snapshot.set(full, stat.mtimeMs);
+                        } catch (_) {}
+                    }
+                }
+            } catch (_) {}
+        };
+        walk(dir);
+        return snapshot;
+    }
+
+    /**
+     * Memeriksa apakah terdapat file baru atau file yang berubah
+     */
+    checkFilesChanged(dir, beforeSnapshot) {
+        const afterSnapshot = this.getDirSnapshot(dir);
+        if (afterSnapshot.size !== beforeSnapshot.size) return true;
+        for (const [file, mtime] of afterSnapshot.entries()) {
+            if (!beforeSnapshot.has(file) || beforeSnapshot.get(file) !== mtime) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

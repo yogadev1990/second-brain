@@ -188,9 +188,8 @@ io.on('connection', (socket) => {
                 }
             }
             
-            // Simpan kembali ke MongoDB
-            session.history = newHistory;
-            await session.save();
+            // Simpan kembali ke MongoDB secara atomik (bebas VersionError)
+            await ChatSession.updateOne({ deviceId }, { $set: { history: newHistory } }, { upsert: true });
 
             // Perbarui pelacak token bulanan di MongoDB
             if (result.tokenUsage && result.tokenUsage.totalTokens) {
