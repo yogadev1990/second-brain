@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import Docker from 'dockerode';
 import { exec } from 'child_process';
 import util from 'util';
@@ -364,6 +366,27 @@ export class ContainerUpdaterService {
     }
 
     async buildImage(candidateImageTag, targetHostDir) {
+        // Pastikan file Dockerfile ada di dalam direktori konteks build (mencegah error 'open Dockerfile: no such file')
+        const dockerfilePath = path.join(targetHostDir, 'Dockerfile');
+        if (!fs.existsSync(dockerfilePath)) {
+            logger.warn({ targetHostDir }, 'Dockerfile tidak ditemukan di direktori konteks. Membuat Dockerfile default secara otomatis...');
+            const defaultDockerfile = [
+                'FROM node:20-alpine',
+                'RUN apk add --no-cache docker-cli docker-cli-buildx git',
+                'WORKDIR /app',
+                'COPY package*.json ./',
+                'RUN npm install --omit=dev',
+                'COPY . .',
+                'EXPOSE 3000',
+                'CMD ["npm", "start"]\n'
+            ].join('\n');
+            try {
+                fs.writeFileSync(dockerfilePath, defaultDockerfile, 'utf-8');
+            } catch (writeErr) {
+                logger.warn({ err: writeErr.message }, 'Tidak dapat menulis Dockerfile fallback ke direktori konteks.');
+            }
+        }
+
         try {
             await execAsync(`docker build -t ${candidateImageTag} "${targetHostDir}"`);
         } catch (err) {
