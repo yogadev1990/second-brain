@@ -227,9 +227,62 @@ async function runTests() {
         console.error('❌ FAIL Test 4:', err);
     }
 
+    // -------------------------------------------------------------
+    // TEST 5: Skenario Secondbrain / Named Volume Exclusion
+    // -------------------------------------------------------------
+    totalTests++;
+    console.log('\n▶️  [Test 5] Skenario Named Volume Exclusion (secondbrain / data volume)');
+    try {
+        const updater = new ContainerUpdaterService();
+        const mockDocker = new MockDocker();
+        
+        // Mock kontainer secondbrain dengan binds volume docker
+        const secondbrainMock = new MockDockerContainer('secondbrain');
+        secondbrainMock.inspect = async () => ({
+            State: { Running: true, Dead: false, OOMKilled: false },
+            HostConfig: {
+                Binds: [
+                    '/var/run/docker.sock:/var/run/docker.sock',
+                    'second-brain_wiki-content-data:/app/shared/wiki_content:rw'
+                ]
+            },
+            NetworkSettings: { Networks: { 'waguri-internal': {} } },
+            Config: { Env: ['NODE_ENV=production'] }
+        });
+        mockDocker.containers.set('secondbrain', secondbrainMock);
+
+        let capturedBuildContext = null;
+        updater.docker = mockDocker;
+        updater.buildImage = async (tag, contextDir) => {
+            capturedBuildContext = contextDir;
+        };
+        updater.emitChatroomLog = async () => {};
+        updater.createGitCheckpoint = async () => true;
+        updater.clearGitCheckpoint = async () => {};
+        updater.revertGitCheckpoint = async () => true;
+        updater.probeContainerHealth = async () => true;
+
+        const result = await updater.updateContainer({
+            containerName: 'secondbrain',
+            taskDescription: 'Tes Named Volume Exclusion',
+            failurePolicy: FAILURE_POLICIES.AUTO_REPAIR_THEN_ROLLBACK,
+            healthcheckTimeoutMs: 1000
+        });
+
+        assert.strictEqual(result.status, 'success');
+        assert.notStrictEqual(capturedBuildContext, 'second-brain_wiki-content-data', 'Build context tidak boleh bernama named volume!');
+        assert.strictEqual(capturedBuildContext, process.cwd(), 'Build context secondbrain harus fallback ke process.cwd()');
+
+        console.log('✅ PASS: Named volume dan docker.sock berhasil diabaikan, context fallback ke direktori kerja yang valid.');
+        passedTests++;
+    } catch (err) {
+        console.error('❌ FAIL Test 5:', err);
+    }
+
     console.log('\n====================================================');
     console.log(`🎉 HASIL PENGUJIAN: ${passedTests}/${totalTests} UJI KETAT LOLOS SEMPURNA!`);
     console.log('====================================================\n');
+    process.exit(passedTests === totalTests ? 0 : 1);
 }
 
 runTests().catch(err => {

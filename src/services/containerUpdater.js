@@ -86,10 +86,26 @@ export class ContainerUpdaterService {
             }
 
             // Tentukan direktori kode sumber target di host
-            if (!workingDir && currentInspect?.HostConfig?.Binds) {
+            const isSelfContainer = containerName === (process.env.CONTAINER_NAME || 'secondbrain');
+
+            if (!workingDir && !isSelfContainer && currentInspect?.HostConfig?.Binds) {
                 for (const bind of currentInspect.HostConfig.Binds) {
                     const [hostPath, containerPath] = bind.split(':');
-                    if (containerPath.includes('app') || containerPath.includes('workspace') || containerPath.includes('html')) {
+
+                    // Pastikan hostPath adalah path absolut direktori host, bukan Docker named volume atau socket
+                    const isAbsolutePath = hostPath.startsWith('/') || hostPath.startsWith('./') || /^[a-zA-Z]:[\\/]/.test(hostPath);
+                    if (!isAbsolutePath || hostPath.includes('docker.sock')) {
+                        continue;
+                    }
+
+                    // Pastikan containerPath adalah root direktori aplikasi/workspace, bukan subfolder/data volume
+                    const isPrimaryAppDir = 
+                        containerPath === '/app' || 
+                        containerPath === '/workspace' || 
+                        containerPath.startsWith('/var/www') || 
+                        containerPath.startsWith('/usr/share/nginx/html');
+
+                    if (isPrimaryAppDir) {
                         targetHostDir = hostPath;
                         break;
                     }
@@ -348,7 +364,9 @@ export class ContainerUpdaterService {
     }
 
     async buildImage(candidateImageTag, targetHostDir) {
-        await execAsync(`docker build -t ${candidateImageTag} "${targetHostDir}"`);
+        await execAsync(`docker build -t ${candidateImageTag} "${targetHostDir}"`, {
+            env: { ...process.env, DOCKER_BUILDKIT: '1' }
+        });
     }
 
     async createGitCheckpoint(targetHostDir, tag) {

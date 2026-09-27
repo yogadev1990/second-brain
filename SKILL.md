@@ -51,9 +51,13 @@ Katalog fungsi/tool yang terdaftar secara dinamis ke Gemini 2.5 Flash / 3.8 Flas
 - **`tarik_data_cuaca`**
   - *Deskripsi:* Mengecek kondisi dan prakiraan cuaca kota (contoh: Palembang) via Open-Meteo.
   - *File:* `src/tools/eksternal/cekCuaca.js`
+- **`cari_web_langsung`**
+  - *Deskripsi:* Melakukan pencarian langsung ke Google Search untuk informasi fakta terkini atau berita hangat.
+  - *File:* `src/tools/eksternal/cariWeb.js`
 - **`gali_berita_pasar`**
   - *Deskripsi:* Mengambil ringkasan sentimen berita keuangan, IHSG, atau kripto via Google News RSS.
   - *File:* `src/tools/keuangan/gali_berita_pasar.js`
 - **`perbarui_portofolio_aset`**
   - *Deskripsi:* Memperbarui pencatatan kepemilikan aset finansial di database.
   - *File:* `src/tools/keuangan/perbarui_portofolio_aset.js`
+
