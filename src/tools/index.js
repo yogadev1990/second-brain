@@ -1,9 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { mcpClient, McpClient } from '../services/mcpClient.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
 
 async function loadTools() {
     const declarations = [];
@@ -47,6 +49,19 @@ async function loadTools() {
         }
     }
     
+    // Pemuatan alat dinamis dari MCP Sandbox Server (jika aktif)
+    try {
+        const mcpTools = await mcpClient.fetchTools();
+        for (const tool of mcpTools) {
+            const geminiDecl = McpClient.convertMcpSchemaToGemini(tool);
+            declarations.push(geminiDecl);
+            handlers[tool.name] = (args) => mcpClient.executeTool(tool.name, args);
+            console.log(`📦 Alat MCP terdaftar: ${tool.name} (MCP Sandbox)`);
+        }
+    } catch (mcpErr) {
+        console.warn(`[Tools Registry] Melewati pemuatan awal MCP tools: ${mcpErr.message}`);
+    }
+
     return { declarations, handlers };
 }
 
@@ -57,3 +72,26 @@ const registry = await loadTools();
 // Ekspor registry yang akan disuntikkan ke Gemini
 export const toolDeclarations = registry.declarations;
 export const toolHandlers = registry.handlers;
+
+/**
+ * Fungsi untuk memperbarui tools dari MCP Sandbox secara on-the-fly tanpa restart
+ */
+export async function refreshMcpTools() {
+    try {
+        const mcpTools = await mcpClient.fetchTools();
+        for (const tool of mcpTools) {
+            const geminiDecl = McpClient.convertMcpSchemaToGemini(tool);
+            const existingIdx = toolDeclarations.findIndex(d => d.name === tool.name);
+            if (existingIdx >= 0) {
+                toolDeclarations[existingIdx] = geminiDecl;
+            } else {
+                toolDeclarations.push(geminiDecl);
+            }
+            toolHandlers[tool.name] = (args) => mcpClient.executeTool(tool.name, args);
+        }
+        return { success: true, count: mcpTools.length };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+}
+

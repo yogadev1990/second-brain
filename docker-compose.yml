@@ -19,6 +19,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - MQTT_BROKER_URL=mqtt://mosquitto:1883
+      - MCP_SERVER_URL=http://mcp-sandbox:4000
     depends_on:
       redis:
         condition: service_healthy
@@ -33,6 +34,29 @@ services:
     networks:
       - waguri-internal
       - proxy-network
+
+  mcp-sandbox:
+    build: ./mcp-sandbox
+    container_name: waguri-mcp-sandbox
+    restart: always
+    environment:
+      - PORT=4000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - TOOLS_GIT_REPO=${TOOLS_GIT_REPO:-}
+      - GIT_BRANCH=${GIT_BRANCH:-main}
+    volumes:
+      - mcp-workspace:/workspace
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+          cpus: '1.0'
+    networks:
+      - waguri-internal
+    depends_on:
+      redis:
+        condition: service_healthy
 
   redis:
     image: redis:7.2-alpine
@@ -75,3 +99,4 @@ networks:
 volumes:
   mosquitto-data:
   wiki-content-data:
+  mcp-workspace:
