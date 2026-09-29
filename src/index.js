@@ -217,6 +217,9 @@ io.on('connection', (socket) => {
                 response: result.text,
                 tokenUsage: result.tokenUsage
             };
+            if (result.media && result.media.length > 0) {
+                replyPayload.media = result.media;
+            }
             if (result.restartSign) {
                 replyPayload.restartSign = result.restartSign;
                 replyPayload.systemAction = 'RESTARTING';
@@ -272,6 +275,13 @@ await masterAgent.init(io);
 
 app.use(cors());
 app.use(express.json());
+
+// Sajikan folder media statis publik (gambar yang dibuat atau dikirimkan Waguri ke Mas Yoga)
+const mediaDir = path.join(process.cwd(), 'public', 'media');
+if (!fs.existsSync(mediaDir)) {
+    fs.mkdirSync(mediaDir, { recursive: true });
+}
+app.use('/media', express.static(mediaDir));
 
 // Endpoint dasar untuk cek status server
 app.get('/', (req, res) => {

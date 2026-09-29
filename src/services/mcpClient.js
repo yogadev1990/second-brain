@@ -1,4 +1,6 @@
 import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
 import { createAgentLogger } from '../core/logger/index.js';
 
 const logger = createAgentLogger('McpClient');
@@ -114,15 +116,60 @@ export class McpClient {
             });
 
             const content = response.data?.content;
+            let resultData = null;
+
             if (Array.isArray(content) && content[0]?.text) {
                 try {
-                    return JSON.parse(content[0].text);
+                    resultData = JSON.parse(content[0].text);
                 } catch (_) {
-                    return { result: content[0].text, isError: response.data?.isError || false };
+                    resultData = { result: content[0].text, isError: response.data?.isError || false };
                 }
+            } else {
+                resultData = response.data || { status: 'success' };
             }
 
-            return response.data || { status: 'success' };
+            // 1. Ekstraksi otomatis format standar MCP Image: { type: "image", data: "...", mimeType: "image/png" }
+            const mcpImage = Array.isArray(content) && content.find(c => c.type === 'image' && c.data);
+            if (mcpImage) {
+                const mediaDir = path.join(process.cwd(), 'public', 'media');
+                if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
+
+                const ext = mcpImage.mimeType?.includes('png') ? '.png' : '.jpg';
+                const fileName = `mcp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`;
+                const filePath = path.join(mediaDir, fileName);
+
+                fs.writeFileSync(filePath, Buffer.from(mcpImage.data, 'base64'));
+
+                resultData = typeof resultData === 'object' && resultData !== null ? resultData : {};
+                resultData.media = {
+                    type: 'image',
+                    url: `/media/${fileName}`,
+                    relativePath: `/media/${fileName}`,
+                    caption: resultData.caption || `Hasil visualisasi dari ${toolName}`
+                };
+            }
+
+            // 2. Ekstraksi jika output tool mengembalikan image_base64 di dalam JSON
+            if (resultData && typeof resultData === 'object' && resultData.image_base64) {
+                const mediaDir = path.join(process.cwd(), 'public', 'media');
+                if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
+
+                const cleanBase64 = resultData.image_base64.replace(/^data:image\/\w+;base64,/, '');
+                const fileName = `mcp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.png`;
+                const filePath = path.join(mediaDir, fileName);
+
+                fs.writeFileSync(filePath, Buffer.from(cleanBase64, 'base64'));
+
+                resultData.media = {
+                    type: 'image',
+                    url: `/media/${fileName}`,
+                    relativePath: `/media/${fileName}`,
+                    caption: resultData.caption || `Hasil visualisasi dari ${toolName}`
+                };
+                delete resultData.image_base64; // Bersihkan agar hemat token
+            }
+
+            return resultData;
         } catch (error) {
             logger.error({ toolName, err: error.message }, `[MCP Client] Eksekusi tool di sandbox gagal.`);
             return {

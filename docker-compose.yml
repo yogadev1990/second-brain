@@ -11,6 +11,7 @@ services:
       # Mounting docker.sock agar Subagent Watchdog dapat memantau Docker Daemon host
       - /var/run/docker.sock:/var/run/docker.sock
       - wiki-content-data:/app/shared/wiki_content
+      - waguri-media-data:/app/public/media
     env_file:
       - .env
     environment:
@@ -47,6 +48,7 @@ services:
       - GIT_BRANCH=${GIT_BRANCH:-main}
     volumes:
       - mcp-workspace:/workspace
+      - waguri-media-data:/app/public/media
     deploy:
       resources:
         limits:
@@ -100,3 +102,4 @@ volumes:
   mosquitto-data:
   wiki-content-data:
   mcp-workspace:
+  waguri-media-data:
