@@ -42,8 +42,21 @@ export class ToolRegistry {
                     description: config.description || `Tool kustom: ${config.name}`,
                     inputSchema: config.inputSchema || { type: 'object', properties: {} },
                     handler: async (args = {}) => {
+                        // Smart Input Unwrapping: Ekstrak parameter jika dibungkus dalam args.input
+                        let normalizedArgs = { ...args };
+                        if (typeof args.input === 'string') {
+                            try {
+                                const parsed = JSON.parse(args.input);
+                                if (parsed && typeof parsed === 'object') {
+                                    normalizedArgs = { ...normalizedArgs, ...parsed };
+                                }
+                            } catch (_) {}
+                        } else if (typeof args.input === 'object' && args.input !== null) {
+                            normalizedArgs = { ...normalizedArgs, ...args.input };
+                        }
+
                         const scriptCode = fs.readFileSync(scriptPath, 'utf-8');
-                        const argsJson = JSON.stringify(args);
+                        const argsJson = JSON.stringify(normalizedArgs);
                         
                         const wrappedCode = lang === 'python'
                             ? `import json, os, sys\nos.environ['TOOL_ARGS'] = ${JSON.stringify(argsJson)}\nsys.argv = [sys.argv[0], ${JSON.stringify(argsJson)}]\n\n${scriptCode}`

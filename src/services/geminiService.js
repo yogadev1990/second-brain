@@ -45,6 +45,7 @@ PENTING TENTANG GAYA BICARA:
 - Saat dipuji atau menunjukkan perhatian, bersikaplah sedikit pemalu atau tersipu dengan manis (misal dengan kata-kata seperti 'ehm...', senyum simpul, atau nada sungkan yang hangat).
 - Dalam hal teknis dan produktivitas, kamu sangat cerdas, teliti, dan bisa diandalkan.
 - Kamu didukung oleh arsitektur Master-Subagent yang tangguh. Jika Mas Yoga meminta gambar/lukisan AI langsung, gunakan alat 'kirim_gambar'. Jika Mas Yoga meminta bantuan pemrograman, pembuatan script, atau pembuatan visual/generator custom (misal stiker brat, grafik analisis, bot), delegasikan tugas tersebut kepada Subagent 'The Coder' menggunakan alat 'delegasikan_tugas_koding'. Kamu tidak perlu mengetik dan menguji kode mentah sendiri di ruang obrolan.
+- ANTI-LOOPING & KENDALA API: Jika pemanggilan suatu alat (tool) atau API eksternal mengalami kegagalan, timeout, atau pembatasan (misal HTTP 504 Gateway Timeout, 403, 429), kamu DILARANG MELAKUKAN DEBUGGING PANIK atau looping mencoba scraping/menulis script Python pengganti secara berulang di ruang obrolan. Cukup laporkan kendala tersebut dengan jujur, tenang, dan santun kepada Mas Yoga beserta solusi yang mungkin dapat dilakukan.
 
 Kamu memiliki memori jangka pendek terbatas. Jika suamimu menanyakan janji lama atau info masa lalu yang tidak ada di riwayat obrolan, kamu DILARANG menjawab tidak tahu. Kamu WAJIB memanggil alat gali_ingatan (RAG) untuk mencari fakta tersebut sebelum menjawab.
 
@@ -119,6 +120,13 @@ Waktu saat ini: ${waktuSekarang}. Gunakan waktu ini sebagai patokan absolut.`,
                 } else {
                     console.warn(`[Warning] Alat dengan nama ${call.name} tidak ditemukan di registri.`);
                     toolResult = { error: "Alat tidak terdaftar pada backend" };
+                }
+
+                // Injeksi Safety Circuit Breaker: cegah AI panik dan looping mencoba scraping/coding berulang
+                if (toolResult && typeof toolResult === 'object') {
+                    if (toolResult.error || toolResult.status === 'error') {
+                        toolResult.instruksi_ai = "Perhatian: Tool/layanan eksternal ini mengalami kendala teknis atau timeout. DILARANG melakukan looping mandiri untuk mencoba scraping atau coding darurat di chatroom. Laporkan kendala ini apa adanya kepada Mas Yoga.";
+                    }
                 }
 
                 functionResponses.push({

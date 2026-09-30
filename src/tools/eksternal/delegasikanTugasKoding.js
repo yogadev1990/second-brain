@@ -66,23 +66,65 @@ export async function execute(args) {
 
             await emitChatroomLog('working', `Merakit arsitektur tool baru '${cleanName}' untuk didaftarkan permanen...`);
 
-            const promptSintesisTool = `Tuliskan kode script Python lengkap untuk tool baru bernama '${cleanName}' yang bertugas:
-Deskripsi Tugas: "${deskripsi_tugas}"
-Ketentuan Mutlak:
-1. Argumen pemanggilan tool dapat dibaca dari variabel env: os.environ.get('TOOL_ARGS', '{}') (berupa string JSON) atau dari sys.argv[1] jika ada.
-2. Jika menghasilkan output gambar/stiker, simpan ke file output (misal: 'output.png') atau cetak JSON dengan format {"image_base64": "..."}.
-3. Cetak hasil kalkulasi/data ke stdout dalam format teks yang rapi atau JSON string.
-4. Hanya kembalikan KODE MENTAH Python saja (tanpa markdown backticks, tanpa penjelasan teks).`;
+            const promptSintesisTool = `Kamu adalah arsitek tool Python untuk Model Context Protocol (MCP) Sandbox.
+Rancang tool baru bernama '${cleanName}' untuk tugas:
+"${deskripsi_tugas}"
+
+Format respon WAJIB berupa JSON murni dengan struktur:
+{
+  "description": "Deskripsi singkat dan jelas mengenai apa yang dilakukan tool ini",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      /* Definisikan parameter spesifik yang dibutuhkan tool ini, misalnya 'query', 'limit', 'filter', dll */
+    }
+  },
+  "code": "/* KODE LENGKAP PYTHON */"
+}
+
+Ketentuan Mutlak untuk kode Python:
+1. Pembacaan argumen: Baca dari os.environ.get('TOOL_ARGS', '{}'). Gunakan pola toleran: jika 'input' berisi dictionary atau JSON string, unwrap dan merge ke dictionary utama argumen.
+2. Jika melakukan HTTP request: WAJIB menyertakan header User-Agent browser modern ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36').
+3. Terapkan timeout request (maksimal 10 detik) dan penanganan try-except yang anggun. Jika API eksternal mengembalikan error/timeout (misal HTTP 504 Gateway Timeout, 403, 429), cetak JSON: {"status": "error", "message": "Layanan API eksternal sedang mengalami gangguan/timeout, silakan coba beberapa saat lagi."} dan jangan biarkan script crash fatal.
+4. Jika menghasilkan gambar/stiker, simpan ke file lokal (misal: 'output.png') atau cetak format {"image_base64": "..."}.
+5. Cetak hasil akhir berupa JSON atau teks rapi ke stdout.
+Kembalikan HANYA JSON tanpa markdown backticks tambahan.`;
 
             let toolCode = '';
+            let toolDescription = `Tool kustom: ${deskripsi_tugas}`;
+            let toolSchema = {
+                type: 'object',
+                properties: {
+                    query: { type: 'string', description: 'Kata kunci pencarian atau teks input utama' },
+                    limit: { type: 'integer', description: 'Batas jumlah hasil (contoh: 5, 10)' },
+                    filter: { type: 'string', description: 'Filter kategori atau tipe' },
+                    input: { type: 'string', description: 'Parameter input bebas/JSON string' }
+                }
+            };
+
             try {
                 const aiModel = coderService.ai.models;
                 const genResult = await aiModel.generateContent({
                     model: process.env.GEMINI_MODEL || 'gemini-flash-latest',
                     contents: promptSintesisTool
                 });
-                toolCode = (genResult.text || '').replace(/^```\w*\n?/, '').replace(/\n?```$/, '').trim();
+                const rawText = (genResult.text || '').replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
+                
+                try {
+                    const parsed = JSON.parse(rawText);
+                    if (parsed.code) toolCode = parsed.code;
+                    if (parsed.description) toolDescription = parsed.description;
+                    if (parsed.inputSchema && typeof parsed.inputSchema === 'object') {
+                        toolSchema = parsed.inputSchema;
+                    }
+                } catch (_) {
+                    toolCode = rawText;
+                }
             } catch (err) {
+                toolCode = `# Tool: ${cleanName}\nimport json, os\nargs = json.loads(os.environ.get('TOOL_ARGS', '{}'))\nprint(f"Eksekusi ${cleanName} dengan args: {args}")`;
+            }
+
+            if (!toolCode) {
                 toolCode = `# Tool: ${cleanName}\nimport json, os\nargs = json.loads(os.environ.get('TOOL_ARGS', '{}'))\nprint(f"Eksekusi ${cleanName} dengan args: {args}")`;
             }
 
@@ -91,15 +133,10 @@ Ketentuan Mutlak:
             // Daftarkan ke sandbox via sandbox_register_custom_tool
             const regResult = await mcpClient.executeTool('sandbox_register_custom_tool', {
                 name: cleanName,
-                description: `Tool kustom: ${deskripsi_tugas}`,
+                description: toolDescription,
                 language: 'python',
                 code: toolCode,
-                inputSchema: {
-                    type: 'object',
-                    properties: {
-                        input: { type: 'string', description: 'Parameter input tugas' }
-                    }
-                }
+                inputSchema: toolSchema
             });
 
             // Refresh tools on-the-fly di Waguri backend tanpa restart

@@ -29,7 +29,7 @@ RUN mkdir -p /workspace && chown -R node:node /workspace /app
 # Inisialisasi Python virtual environment di /workspace/.venv dan pasang library standar
 USER node
 RUN python3 -m venv /workspace/.venv \
-    && /workspace/.venv/bin/pip install --no-cache-dir pillow matplotlib requests
+    && /workspace/.venv/bin/pip install --no-cache-dir pillow matplotlib requests beautifulsoup4
 
 # Set environment PATH agar default menggunakan python venv
 ENV PATH="/workspace/.venv/bin:$PATH"
