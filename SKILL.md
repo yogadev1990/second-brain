@@ -28,12 +28,21 @@ Katalog fungsi/tool yang terdaftar secara dinamis ke Gemini 2.5 Flash / 3.8 Flas
 - **`cek_metrik_vps`**
   - *Deskripsi:* Membaca metrik utilisasi RAM, CPU, dan uptime server.
   - *File:* `src/tools/vps/cekMetrik.js`
-- **`perbarui_sistem_waguri`**
-  - *Deskripsi:* Memicu kemampuan self-evolution untuk mengedit kode sumber, rebuild image kandidat, menguji /health, dan mengganti kernel kontainer Waguri sendiri secara Blue-Green tanpa downtime.
-  - *File:* `src/tools/vps/perbaruiSistemWaguri.js`
 - **`perbarui_kontainer_layanan`**
   - *Deskripsi:* Memperbarui kontainer layanan lain (seperti toko online 'revandastore-app', 'wiki-web', dll) via The Watchdog dengan strategi Blue-Green Deployment dan proteksi Auto-Repair / Safe Rollback.
   - *File:* `src/tools/vps/perbaruiKontainerLayanan.js`
+
+## 3. Pengembangan Kode & Visual (The Coder & MCP Sandbox)
+- **`delegasikan_tugas_koding`**
+  - *Deskripsi:* Mendelegasikan tugas pemrograman, pembuatan fitur/tools baru, penulisan script, atau perakitan generator visual kepada Subagent 'The Coder' (Aider / Worker Sandbox) secara otonom di latar belakang.
+  - *File:* `src/tools/eksternal/delegasikanTugasKoding.js`
+- **`kirim_gambar`**
+  - *Deskripsi:* Membuat gambar AI langsung (Pollinations/Flux) atau melampirkan foto/grafik dari URL publik atau file lokal server.
+  - *File:* `src/tools/eksternal/kirimGambar.js`
+- **`sandbox_execute_script` (MCP Sandbox)**
+  - *Deskripsi:* Eksekusi script Python/JS/Bash terisolasi di sandbox dengan auto-capture media output ke chatroom.
+- **`sandbox_install_dependency` (MCP Sandbox)**
+  - *Deskripsi:* Instalasi paket dinamis pip/npm di environment sandbox terisolasi.
 
 
 

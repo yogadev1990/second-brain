@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     procps \
+    fonts-dejavu-core \
+    fonts-freefont-ttf \
     && rm -rf /var/lib/apt/lists/*
 
 # Buat direktori server dan workspace
@@ -24,9 +26,10 @@ COPY src/ ./src/
 # Siapkan direktori workspace eksekusi sandbox
 RUN mkdir -p /workspace && chown -R node:node /workspace /app
 
-# Inisialisasi Python virtual environment di /workspace/.venv
+# Inisialisasi Python virtual environment di /workspace/.venv dan pasang library standar
 USER node
-RUN python3 -m venv /workspace/.venv
+RUN python3 -m venv /workspace/.venv \
+    && /workspace/.venv/bin/pip install --no-cache-dir pillow matplotlib requests
 
 # Set environment PATH agar default menggunakan python venv
 ENV PATH="/workspace/.venv/bin:$PATH"

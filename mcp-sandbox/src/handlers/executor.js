@@ -6,10 +6,14 @@ import { redisLogger } from '../services/redisLogger.js';
 
 const execAsync = promisify(exec);
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || path.resolve(process.cwd(), 'workspace');
+const MEDIA_DIR = process.env.MEDIA_DIR || (fs.existsSync('/app/public/media') ? '/app/public/media' : path.resolve(process.cwd(), '..', 'public', 'media'));
 
-// Pastikan workspace dir ada
+// Pastikan direktori ada
 if (!fs.existsSync(WORKSPACE_DIR)) {
     fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
+}
+if (!fs.existsSync(MEDIA_DIR)) {
+    try { fs.mkdirSync(MEDIA_DIR, { recursive: true }); } catch (_) {}
 }
 
 export class Executor {
@@ -84,6 +88,26 @@ export class Executor {
 
         await redisLogger.logProgress('thinking', `Mempersiapkan eksekusi script [${lang}] di sandbox...`);
 
+        // Catat daftar file gambar sebelum eksekusi untuk mendeteksi output baru
+        const getWorkspaceImages = () => {
+            if (!fs.existsSync(WORKSPACE_DIR)) return new Map();
+            const map = new Map();
+            try {
+                const files = fs.readdirSync(WORKSPACE_DIR);
+                const imgExts = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg'];
+                for (const f of files) {
+                    const ext = path.extname(f).toLowerCase();
+                    if (imgExts.includes(ext)) {
+                        const full = path.join(WORKSPACE_DIR, f);
+                        const stat = fs.statSync(full);
+                        map.set(f, stat.mtimeMs);
+                    }
+                }
+            } catch (_) {}
+            return map;
+        };
+
+        const imagesBefore = getWorkspaceImages();
         const tempFileName = `exec_${Date.now()}_${Math.random().toString(36).substring(7)}`;
         let filePath = '';
         let cmd = '';
@@ -118,12 +142,80 @@ export class Executor {
 
             await redisLogger.logProgress('done', `Eksekusi script [${lang}] selesai.`);
 
-            return {
+            // Deteksi apakah skrip menghasilkan file gambar baru di workspace
+            const imagesAfter = getWorkspaceImages();
+            let detectedMedia = null;
+
+            for (const [f, mtime] of imagesAfter.entries()) {
+                if (!imagesBefore.has(f) || imagesBefore.get(f) !== mtime) {
+                    const sourcePath = path.join(WORKSPACE_DIR, f);
+                    const ext = path.extname(f);
+                    const targetFileName = `mcp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`;
+                    const destPath = path.join(MEDIA_DIR, targetFileName);
+
+                    try {
+                        fs.copyFileSync(sourcePath, destPath);
+                        detectedMedia = {
+                            type: 'image',
+                            url: `/media/${targetFileName}`,
+                            relativePath: `/media/${targetFileName}`,
+                            caption: `Hasil visualisasi '${f}' dari sandbox`
+                        };
+                        await redisLogger.logProgress('working', `Gambar output terdeteksi: ${f} -> dipublikasikan ke chatroom.`);
+                    } catch (err) {
+                        console.error('[Executor] Gagal menyalin gambar output:', err.message);
+                    }
+                    break;
+                }
+            }
+
+            // Cek jika stdout berisi JSON yang menyertakan image_base64
+            let extractedBase64 = null;
+            let caption = null;
+            if (stdout && stdout.includes('image_base64')) {
+                try {
+                    const parsed = JSON.parse(stdout);
+                    if (parsed.image_base64) {
+                        extractedBase64 = parsed.image_base64;
+                        caption = parsed.caption;
+                    }
+                } catch (_) {
+                    const match = stdout.match(/"image_base64"\s*:\s*"([^"]+)"/);
+                    if (match) {
+                        extractedBase64 = match[1];
+                    }
+                }
+            }
+
+            if (extractedBase64 && !detectedMedia) {
+                const clean = extractedBase64.replace(/^data:image\/\w+;base64,/, '');
+                const targetFileName = `mcp_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.png`;
+                const destPath = path.join(MEDIA_DIR, targetFileName);
+                try {
+                    fs.writeFileSync(destPath, Buffer.from(clean, 'base64'));
+                    detectedMedia = {
+                        type: 'image',
+                        url: `/media/${targetFileName}`,
+                        relativePath: `/media/${targetFileName}`,
+                        caption: caption || 'Hasil visualisasi dari script sandbox'
+                    };
+                } catch (err) {
+                    console.error('[Executor] Gagal menyimpan base64 image:', err.message);
+                }
+            }
+
+            const responsePayload = {
                 status: 'success',
                 language: lang,
                 stdout: stdout.trim(),
                 stderr: stderr.trim()
             };
+
+            if (detectedMedia) {
+                responsePayload.media = detectedMedia;
+            }
+
+            return responsePayload;
         } catch (error) {
             const isTimeout = error.killed && error.signal === 'SIGTERM';
             const errMsg = isTimeout ? `Script timeout melebihi batas ${allowedTimeout / 1000} detik!` : error.message;

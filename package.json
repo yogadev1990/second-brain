@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node tests/geminiHistory.test.js && node tests/mongoMemoryService.test.js && node tests/containerUpdater.test.js && node tests/mcpClient.test.js && node tests/kirimGambar.test.js"
+    "test": "node tests/geminiHistory.test.js && node tests/mongoMemoryService.test.js && node tests/containerUpdater.test.js && node tests/mcpClient.test.js && node tests/kirimGambar.test.js && node tests/delegasikanKoding.test.js"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

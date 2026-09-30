@@ -149,7 +149,23 @@ export class McpClient {
                 };
             }
 
-            // 2. Ekstraksi jika output tool mengembalikan image_base64 di dalam JSON
+            // 2. Ekstraksi jika output tool menyimpan image_base64 di dalam resultData.stdout
+            if (resultData && typeof resultData.stdout === 'string' && resultData.stdout.includes('image_base64') && !resultData.image_base64) {
+                try {
+                    const parsedStdout = JSON.parse(resultData.stdout);
+                    if (parsedStdout.image_base64) {
+                        resultData.image_base64 = parsedStdout.image_base64;
+                        if (parsedStdout.caption) resultData.caption = parsedStdout.caption;
+                    }
+                } catch (_) {
+                    const match = resultData.stdout.match(/"image_base64"\s*:\s*"([^"]+)"/);
+                    if (match) {
+                        resultData.image_base64 = match[1];
+                    }
+                }
+            }
+
+            // 3. Ekstraksi jika output tool mengembalikan image_base64 di dalam JSON
             if (resultData && typeof resultData === 'object' && resultData.image_base64) {
                 const mediaDir = path.join(process.cwd(), 'public', 'media');
                 if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
@@ -167,6 +183,14 @@ export class McpClient {
                     caption: resultData.caption || `Hasil visualisasi dari ${toolName}`
                 };
                 delete resultData.image_base64; // Bersihkan agar hemat token
+            }
+
+            // 4. Normalisasi URL media jika BASE_URL disetel
+            if (resultData?.media?.url && process.env.BASE_URL) {
+                const baseUrl = process.env.BASE_URL.replace(/\/$/, '');
+                if (!resultData.media.url.startsWith('http')) {
+                    resultData.media.url = `${baseUrl}${resultData.media.url}`;
+                }
             }
 
             return resultData;

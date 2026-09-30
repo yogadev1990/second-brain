@@ -11,7 +11,7 @@ export class ToolRegistry {
         // 1. Eksekusi Script Bebas di Sandbox
         this.register({
             name: 'sandbox_execute_script',
-            description: 'Mengeksekusi kode script (Python, JavaScript/Node, atau Bash) di dalam kontainer sandbox terisolasi tanpa membebani otak utama Waguri.',
+            description: 'Mengeksekusi kode script (Python, JavaScript/Node, atau Bash) di dalam kontainer sandbox terisolasi. Jika script menghasilkan gambar, stiker, atau grafik visual (menggunakan Pillow, matplotlib, dll.), simpan file gambar di direktori kerja (misal: "output.png" atau "brat.png") atau cetak JSON dengan field "image_base64". Sandbox akan otomatis mendeteksi dan menampilkannya langsung ke chatroom Mas Yoga.',
             inputSchema: {
                 type: 'object',
                 properties: {
