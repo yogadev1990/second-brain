@@ -1,4 +1,6 @@
 import assert from 'assert';
+import path from 'path';
+import fs from 'fs';
 import { McpClient } from '../src/services/mcpClient.js';
 import { ToolRegistry } from '../mcp-sandbox/src/handlers/toolRegistry.js';
 
@@ -54,13 +56,15 @@ async function runTests() {
     const registry = new ToolRegistry();
     const builtInTools = registry.listTools();
     
-    assert.strictEqual(builtInTools.length, 4);
+    assert.ok(builtInTools.length >= 6);
     const toolNames = builtInTools.map(t => t.name);
     assert.ok(toolNames.includes('sandbox_execute_script'));
     assert.ok(toolNames.includes('sandbox_install_dependency'));
     assert.ok(toolNames.includes('sandbox_git_sync'));
     assert.ok(toolNames.includes('sandbox_list_files'));
-    console.log(`✅ PASS: Ke-4 tool bawaan sandbox terdaftar: ${toolNames.join(', ')}.`);
+    assert.ok(toolNames.includes('generate_brat_sticker'));
+    assert.ok(toolNames.includes('sandbox_register_custom_tool'));
+    console.log(`✅ PASS: Seluruh tool bawaan sandbox terdaftar: ${toolNames.join(', ')}.`);
 
     // Test 4: Eksekusi Script JavaScript di Sandbox
     console.log('\n▶️  [Test 4] Pengujian Eksekusi Script JavaScript di Sandbox');
@@ -126,6 +130,44 @@ async function runTests() {
     assert.strictEqual(extractedResult.analisis.SNA, 82);
     assert.strictEqual(extractedResult.image_base64, undefined); // Pastikan base64 sudah dibersihkan
     console.log('✅ PASS: Tool MCP analisis sefalometri berhasil mengekstrak gambar tracing & data numerik secara simultan!');
+
+    // Test 7: Registrasi dan Eksekusi Dynamic Custom Tool (Skill Factory)
+    console.log('\n▶️  [Test 7] Pengujian Registrasi dan Eksekusi Dynamic Custom Tool (Skill Factory)');
+    const regResult = await registry.callTool('sandbox_register_custom_tool', {
+        name: 'hitung_diskon_klinis',
+        description: 'Menghitung harga akhir setelah diskon untuk tindakan klinis',
+        language: 'javascript',
+        code: `
+            const args = JSON.parse(process.env.TOOL_ARGS || '{}');
+            const harga = args.harga || 100000;
+            const diskon = args.diskon || 10;
+            const akhir = harga - (harga * diskon / 100);
+            console.log(JSON.stringify({ status: "success", hargaAwal: harga, diskonPersen: diskon, hargaAkhir: akhir }));
+        `,
+        inputSchema: {
+            type: 'object',
+            properties: {
+                harga: { type: 'number' },
+                diskon: { type: 'number' }
+            }
+        }
+    });
+
+    assert.strictEqual(regResult.isError, false);
+    assert.ok(regResult.content[0].text.includes('hitung_diskon_klinis'));
+
+    // Panggil tool baru tersebut via registry
+    const callCustom = await registry.callTool('hitung_diskon_klinis', { harga: 200000, diskon: 25 });
+    assert.strictEqual(callCustom.isError, false);
+    assert.ok(callCustom.content[0].text.includes('150000'));
+    console.log('✅ PASS: Dynamic Tool berhasil didaftarkan dan dieksekusi menghasilkan output presisi (150000)!');
+
+    // Bersihkan file uji coba di workspace/custom_tools
+    const testCustomDir = path.resolve(process.cwd(), 'workspace', 'custom_tools');
+    try {
+        if (fs.existsSync(path.join(testCustomDir, 'hitung_diskon_klinis.json'))) fs.unlinkSync(path.join(testCustomDir, 'hitung_diskon_klinis.json'));
+        if (fs.existsSync(path.join(testCustomDir, 'hitung_diskon_klinis.mjs'))) fs.unlinkSync(path.join(testCustomDir, 'hitung_diskon_klinis.mjs'));
+    } catch (_) {}
 
     console.log('====================================================');
     console.log('🎉 SELURUH PENGUJIAN MODULAR MCP SANDBOX LOLOS 100%!');
